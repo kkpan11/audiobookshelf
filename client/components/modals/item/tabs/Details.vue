@@ -7,18 +7,15 @@
 
     <div class="absolute bottom-0 left-0 w-full py-2 md:py-4 bg-bg" :class="isScrollable ? 'box-shadow-md-up' : 'border-t border-white border-opacity-5'">
       <div class="flex items-center px-4">
-        <ui-btn v-if="userCanDelete" color="error" type="button" class="h-8 hidden md:block" :padding-x="3" small @click.stop.prevent="removeItem">{{ $strings.ButtonRemove }}</ui-btn>
-        <ui-icon-btn bg-color="error" icon="delete" class="md:hidden" :size="7" icon-font-size="1rem" @click.stop.prevent="removeItem" />
-
-        <div class="flex-grow" />
-
         <ui-tooltip :disabled="!!quickMatching" :text="$getString('MessageQuickMatchDescription', [libraryProvider])" direction="bottom" class="mr-2 md:mr-4">
           <ui-btn v-if="userIsAdminOrUp" :loading="quickMatching" color="bg" type="button" class="h-full" small @click.stop.prevent="quickMatch">{{ $strings.ButtonQuickMatch }}</ui-btn>
         </ui-tooltip>
 
-        <ui-tooltip :disabled="!!libraryScan" text="Rescan library item including metadata" direction="bottom" class="mr-2 md:mr-4">
-          <ui-btn v-if="userIsAdminOrUp && !isFile" :loading="rescanning" :disabled="!!libraryScan" color="bg" type="button" class="h-full" small @click.stop.prevent="rescan">{{ $strings.ButtonReScan }}</ui-btn>
+        <ui-tooltip :disabled="isLibraryScanning" text="Rescan library item including metadata" direction="bottom" class="mr-2 md:mr-4">
+          <ui-btn v-if="userIsAdminOrUp && !isFile" :loading="rescanning" :disabled="isLibraryScanning" color="bg" type="button" class="h-full" small @click.stop.prevent="rescan">{{ $strings.ButtonReScan }}</ui-btn>
         </ui-tooltip>
+
+        <div class="flex-grow" />
 
         <!-- desktop -->
         <ui-btn @click="save" class="mx-2 hidden md:block">{{ $strings.ButtonSave }}</ui-btn>
@@ -77,18 +74,15 @@ export default {
     mediaMetadata() {
       return this.media.metadata || {}
     },
-    userCanDelete() {
-      return this.$store.getters['user/getUserCanDelete']
-    },
     libraryId() {
       return this.libraryItem ? this.libraryItem.libraryId : null
     },
     libraryProvider() {
       return this.$store.getters['libraries/getLibraryProvider'](this.libraryId) || 'google'
     },
-    libraryScan() {
+    isLibraryScanning() {
       if (!this.libraryId) return null
-      return this.$store.getters['scanners/getLibraryScan'](this.libraryId)
+      return !!this.$store.getters['tasks/getRunningLibraryScanTask'](this.libraryId)
     }
   },
   methods: {
@@ -98,7 +92,7 @@ export default {
 
       var { title, author } = this.$refs.itemDetailsEdit.getTitleAndAuthorName()
       if (!title) {
-        this.$toast.error('Must have a title for quick match')
+        this.$toast.error(this.$strings.ToastTitleRequired)
         return
       }
       this.quickMatching = true
@@ -114,9 +108,9 @@ export default {
           if (res.warning) {
             this.$toast.warning(res.warning)
           } else if (res.updated) {
-            this.$toast.success('Item details updated')
+            this.$toast.success(this.$strings.ToastItemDetailsUpdateSuccess)
           } else {
-            this.$toast.info('No updates were made')
+            this.$toast.info(this.$strings.ToastNoUpdatesNecessary)
           }
         })
         .catch((error) => {
@@ -134,18 +128,18 @@ export default {
           this.rescanning = false
           var result = data.result
           if (!result) {
-            this.$toast.error(`Re-Scan Failed for "${this.title}"`)
+            this.$toast.error(this.$getString('ToastRescanFailed', [this.title]))
           } else if (result === 'UPDATED') {
-            this.$toast.success(`Re-Scan complete item was updated`)
+            this.$toast.success(this.$strings.ToastRescanUpdated)
           } else if (result === 'UPTODATE') {
-            this.$toast.success(`Re-Scan complete item was up to date`)
+            this.$toast.success(this.$strings.ToastRescanUpToDate)
           } else if (result === 'REMOVED') {
-            this.$toast.error(`Re-Scan complete item was removed`)
+            this.$toast.error(this.$strings.ToastRescanRemoved)
           }
         })
         .catch((error) => {
           console.error('Failed to scan library item', error)
-          this.$toast.error('Failed to scan library item')
+          this.$toast.error(this.$strings.ToastScanFailed)
           this.rescanning = false
         })
     },
@@ -162,7 +156,7 @@ export default {
       }
       var updatedDetails = this.$refs.itemDetailsEdit.getDetails()
       if (!updatedDetails.hasChanges) {
-        this.$toast.info('No changes were made')
+        this.$toast.info(this.$strings.MessageNoUpdatesWereNecessary)
         return false
       }
       return this.updateDetails(updatedDetails)
@@ -176,30 +170,13 @@ export default {
       this.isProcessing = false
       if (updateResult) {
         if (updateResult.updated) {
-          this.$toast.success('Item details updated')
+          this.$toast.success(this.$strings.ToastItemDetailsUpdateSuccess)
           return true
         } else {
           this.$toast.info(this.$strings.MessageNoUpdatesWereNecessary)
         }
       }
       return false
-    },
-    removeItem() {
-      if (confirm(`Are you sure you want to remove this item?\n\n*Does not delete your files, only removes the item from audiobookshelf`)) {
-        this.isProcessing = true
-        this.$axios
-          .$delete(`/api/items/${this.libraryItemId}`)
-          .then(() => {
-            console.log('Item removed')
-            this.$toast.success('Item Removed')
-            this.$emit('close')
-            this.isProcessing = false
-          })
-          .catch((error) => {
-            console.error('Remove item failed', error)
-            this.isProcessing = false
-          })
-      }
     },
     checkIsScrollable() {
       this.$nextTick(() => {

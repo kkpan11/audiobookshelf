@@ -10,7 +10,7 @@
         <div class="w-full px-3 py-5 md:p-12">
           <ui-dropdown v-model="newNotification.eventName" :label="$strings.LabelNotificationEvent" :items="eventOptions" class="mb-4" @input="eventOptionUpdated" />
 
-          <ui-multi-select v-model="newNotification.urls" :label="$strings.LabelNotificationAppriseURL" class="mb-2" />
+          <ui-multi-select ref="urlsInput" v-model="newNotification.urls" :label="$strings.LabelNotificationAppriseURL" class="mb-2" />
 
           <ui-text-input-with-label v-model="newNotification.titleTemplate" :label="$strings.LabelNotificationTitleTemplate" class="mb-2" />
 
@@ -77,7 +77,13 @@ export default {
       return this.notificationData.events || []
     },
     eventOptions() {
-      return this.notificationEvents.map((e) => ({ value: e.name, text: e.name, subtext: e.description }))
+      return this.notificationEvents.map((e) => {
+        return {
+          value: e.name,
+          text: e.name,
+          subtext: this.$strings[e.descriptionKey] || e.description
+        }
+      })
     },
     selectedEventData() {
       return this.notificationEvents.find((e) => e.name === this.newNotification.eventName)
@@ -86,7 +92,7 @@ export default {
       return this.selectedEventData && this.selectedEventData.requiresLibrary
     },
     title() {
-      return this.isNew ? 'Create Notification' : 'Update Notification'
+      return this.isNew ? this.$strings.HeaderNotificationCreate : this.$strings.HeaderNotificationUpdate
     },
     availableVariables() {
       return this.selectedEventData ? this.selectedEventData.variables || null : null
@@ -103,8 +109,10 @@ export default {
       if (this.$refs.modal) this.$refs.modal.setHide()
     },
     submitForm() {
+      this.$refs.urlsInput?.forceBlur()
+
       if (!this.newNotification.urls.length) {
-        this.$toast.error('Must enter an Apprise URL')
+        this.$toast.error(this.$strings.ToastAppriseUrlRequired)
         return
       }
 
@@ -125,12 +133,12 @@ export default {
         .$patch(`/api/notifications/${payload.id}`, payload)
         .then((updatedSettings) => {
           this.$emit('update', updatedSettings)
-          this.$toast.success('Notification updated')
+          this.$toast.success(this.$strings.ToastNotificationUpdateSuccess)
           this.show = false
         })
         .catch((error) => {
           console.error('Failed to update notification', error)
-          this.$toast.error('Failed to update notification')
+          this.$toast.error(this.$strings.ToastFailedToUpdate)
         })
         .finally(() => {
           this.processing = false
@@ -147,12 +155,11 @@ export default {
         .$post('/api/notifications', payload)
         .then((updatedSettings) => {
           this.$emit('update', updatedSettings)
-          this.$toast.success('Notification created')
           this.show = false
         })
         .catch((error) => {
           console.error('Failed to create notification', error)
-          this.$toast.error('Failed to create notification')
+          this.$toast.error(this.$strings.ToastNotificationCreateFailed)
         })
         .finally(() => {
           this.processing = false

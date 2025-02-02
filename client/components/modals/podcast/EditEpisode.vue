@@ -12,10 +12,10 @@
     </div>
 
     <div v-show="canGoPrev" class="absolute -left-24 top-0 bottom-0 h-full pointer-events-none flex items-center px-6">
-      <div class="material-icons text-5xl text-white text-opacity-50 hover:text-opacity-90 cursor-pointer pointer-events-auto" @click.stop.prevent="goPrevEpisode" @mousedown.prevent>arrow_back_ios</div>
+      <div class="material-symbols text-5xl text-white text-opacity-50 hover:text-opacity-90 cursor-pointer pointer-events-auto" @click.stop.prevent="goPrevEpisode" @mousedown.prevent>arrow_back_ios</div>
     </div>
     <div v-show="canGoNext" class="absolute -right-24 top-0 bottom-0 h-full pointer-events-none flex items-center px-6">
-      <div class="material-icons text-5xl text-white text-opacity-50 hover:text-opacity-90 cursor-pointer pointer-events-auto" @click.stop.prevent="goNextEpisode" @mousedown.prevent>arrow_forward_ios</div>
+      <div class="material-symbols text-5xl text-white text-opacity-50 hover:text-opacity-90 cursor-pointer pointer-events-auto" @click.stop.prevent="goNextEpisode" @mousedown.prevent>arrow_forward_ios</div>
     </div>
 
     <div ref="wrapper" class="p-4 w-full text-sm rounded-b-lg rounded-tr-lg bg-bg shadow-lg border border-black-300 relative overflow-y-auto" style="max-height: 80vh">
@@ -170,6 +170,12 @@ export default {
         this.show = false
       }
     },
+    libraryItemUpdated(libraryItem) {
+      const episode = libraryItem.media.episodes.find((e) => e.id === this.selectedEpisodeId)
+      if (episode) {
+        this.episodeItem = episode
+      }
+    },
     hotkey(action) {
       if (action === this.$hotkeys.Modal.NEXT_PAGE) {
         this.goNextEpisode()
@@ -178,9 +184,15 @@ export default {
       }
     },
     registerListeners() {
+      if (this.libraryItem) {
+        this.$eventBus.$on(`${this.libraryItem.id}_updated`, this.libraryItemUpdated)
+      }
       this.$eventBus.$on('modal-hotkey', this.hotkey)
     },
     unregisterListeners() {
+      if (this.libraryItem) {
+        this.$eventBus.$on(`${this.libraryItem.id}_updated`, this.libraryItemUpdated)
+      }
       this.$eventBus.$off('modal-hotkey', this.hotkey)
     }
   },

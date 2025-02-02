@@ -18,33 +18,47 @@ Audiobookshelf is a self-hosted audiobook and podcast server.
 
 ### Features
 
-* Fully **open-source**, including the [android & iOS app](https://github.com/advplyr/audiobookshelf-app) *(in beta)*
-* Stream all audio formats on the fly
-* Search and add podcasts to download episodes w/ auto-download
-* Multi-user support w/ custom permissions
-* Keeps progress per user and syncs across devices
-* Auto-detects library updates, no need to re-scan
-* Upload books and podcasts w/ bulk upload drag and drop folders
-* Backup your metadata + automated daily backups
-* Progressive Web App (PWA)
-* Chromecast support on the web app and android app
-* Fetch metadata and cover art from several sources
-* Chapter editor and chapter lookup (using [Audnexus API](https://audnex.us/))
-* Merge your audio files into a single m4b
-* Embed metadata and cover image into your audio files (using [Tone](https://github.com/sandreas/tone))
-* Basic ebook support and e-reader *(experimental)*
+- Fully **open-source**, including the [android & iOS app](https://github.com/advplyr/audiobookshelf-app) _(in beta)_
+- Stream all audio formats on the fly
+- Search and add podcasts to download episodes w/ auto-download
+- Multi-user support w/ custom permissions
+- Keeps progress per user and syncs across devices
+- Auto-detects library updates, no need to re-scan
+- Upload books and podcasts w/ bulk upload drag and drop folders
+- Backup your metadata + automated daily backups
+- Progressive Web App (PWA)
+- Chromecast support on the web app and android app
+- Fetch metadata and cover art from several sources
+- Chapter editor and chapter lookup (using [Audnexus API](https://audnex.us/))
+- Merge your audio files into a single m4b
+- Embed metadata and cover image into your audio files
+- Basic ebook support and ereader
+  - Epub, pdf, cbr, cbz
+  - Send ebook to device (i.e. Kindle)
+- Open RSS feeds for podcasts and audiobooks
 
 Is there a feature you are looking for? [Suggest it](https://github.com/advplyr/audiobookshelf/issues/new/choose)
 
-Join us on [Discord](https://discord.gg/pJsjuNCKRq) or [Matrix](https://matrix.to/#/#audiobookshelf:matrix.org)
+Join us on [Discord](https://discord.gg/HQgCbd6E75)
+
+### Demo
+
+Check out the web client demo: https://audiobooks.dev/ (thanks for hosting [@Vito0912](https://github.com/Vito0912)!)
+
+Username/password: `demo`/`demo` (user account)
 
 ### Android App (beta)
+
 Try it out on the [Google Play Store](https://play.google.com/store/apps/details?id=com.audiobookshelf.app)
 
 ### iOS App (beta)
-Available using Test Flight: https://testflight.apple.com/join/wiic7QIW - [Join the discussion](https://github.com/advplyr/audiobookshelf-app/discussions/60)
+
+**Beta is currently full. Apple has a hard limit of 10k beta testers. Updates will be posted in Discord.**
+
+Using Test Flight: https://testflight.apple.com/join/wiic7QIW **_(beta is full)_**
 
 ### Build your own tools & clients
+
 Check out the [API documentation](https://api.audiobookshelf.org/)
 
 <br />
@@ -57,7 +71,7 @@ Check out the [API documentation](https://api.audiobookshelf.org/)
 
 #### Directory structure and folder names are important to Audiobookshelf!
 
- See [documentation](https://audiobookshelf.org/docs#book-directory-structure) for supported directory structure, folder naming conventions, and audio file metadata usage.
+See [documentation](https://audiobookshelf.org/docs#book-directory-structure) for supported directory structure, folder naming conventions, and audio file metadata usage.
 
 <br />
 
@@ -71,7 +85,7 @@ See [install docs](https://www.audiobookshelf.org/docs)
 
 #### Important! Audiobookshelf requires a websocket connection.
 
-#### Note: Subfolder paths (e.g. /audiobooks) are not supported yet. See [issue](https://github.com/advplyr/audiobookshelf/issues/385)
+#### Note: Using a subfolder is supported with no additional changes but the path must be `/audiobookshelf` (this is not changeable). See [discussion](https://github.com/advplyr/audiobookshelf/discussions/3535)
 
 ### NGINX Proxy Manager
 
@@ -83,31 +97,34 @@ Toggle websockets support.
 
 Add this to the site config file on your nginx server after you have changed the relevant parts in the <> brackets, and inserted your certificate paths.
 
-
 ```bash
-server
-{
-        listen 443 ssl;
-        server_name <sub>.<domain>.<tld>;
+server {
+   listen 443 ssl;
+   server_name <sub>.<domain>.<tld>;
 
-        access_log /var/log/nginx/audiobookshelf.access.log;
-        error_log /var/log/nginx/audiobookshelf.error.log;
+   access_log /var/log/nginx/audiobookshelf.access.log;
+   error_log /var/log/nginx/audiobookshelf.error.log;
 
-        ssl_certificate      /path/to/certificate;
-        ssl_certificate_key  /path/to/key;
+   ssl_certificate      /path/to/certificate;
+   ssl_certificate_key  /path/to/key;
 
-        location / {
-                     proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
-                     proxy_set_header  X-Forwarded-Proto $scheme;
-                     proxy_set_header  Host              $host;
-                     proxy_set_header Upgrade            $http_upgrade;
-                     proxy_set_header Connection         "upgrade";
+   location / {
+      proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto  $scheme;
+      proxy_set_header Host               $http_host;
+      proxy_set_header Upgrade            $http_upgrade;
+      proxy_set_header Connection         "upgrade";
 
-                     proxy_http_version                  1.1;
+      proxy_http_version                  1.1;
 
-                     proxy_pass                          http://<URL_to_forward_to>;
-                     proxy_redirect                      http:// https://;
-                   }
+      proxy_pass                          http://<URL_to_forward_to>;
+      proxy_redirect                      http:// https://;
+
+      # Prevent 413 Request Entity Too Large error
+      # by increasing the maximum allowed size of the client request body
+      # For example, set it to 10 GiB
+      client_max_body_size                10240M;
+   }
 }
 ```
 
@@ -116,10 +133,13 @@ server
 Add this to the site config file on your Apache server after you have changed the relevant parts in the <> brackets, and inserted your certificate paths.
 
 For this to work you must enable at least the following mods using `a2enmod`:
-  - `ssl`
-  - `proxy_module`
-  - `proxy_wstunnel_module`
-  - `rewrite_module`
+
+- `ssl`
+- `proxy`
+- `proxy_http`
+- `proxy_balancer`
+- `proxy_wstunnel`
+- `rewrite`
 
 ```bash
 <IfModule mod_ssl.c>
@@ -144,21 +164,84 @@ For this to work you must enable at least the following mods using `a2enmod`:
 </IfModule>
 ```
 
+If using Apache >= 2.4.47 you can use the following, without having to use any of the `RewriteEngine`, `RewriteCond`, or `RewriteRule` directives. For example:
+
+```xml
+    <Location /audiobookshelf>
+        ProxyPreserveHost on
+        ProxyPass http://localhost:<audiobookshelf_port>/audiobookshelf upgrade=websocket
+        ProxyPassReverse http://localhost:<audiobookshelf_port>/audiobookshelf
+    </Location>
+```
+
+Some SSL certificates like those signed by Let's Encrypt require ACME validation. To allow Let's Encrypt to write and confirm the ACME challenge, edit your VirtualHost definition to prevent proxying traffic that queries `/.well-known` and instead serve that directly:
+
+```bash
+<VirtualHost *:443>
+    # ...
+
+    # create the directory structure  /.well-known/acme-challenges
+    # within DocumentRoot and give the HTTP user recursive write
+    # access to it.
+    DocumentRoot /path/to/local/directory
+
+    ProxyPreserveHost On
+    ProxyPass /.well-known !
+    ProxyPass / http://localhost:<audiobookshelf_port>/
+
+    # ...
+</VirtualHost>
+```
 
 ### SWAG Reverse Proxy
 
-[See this solution](https://forums.unraid.net/topic/112698-support-audiobookshelf/?do=findComment&comment=1049637)
+[See LinuxServer.io config sample](https://github.com/linuxserver/reverse-proxy-confs/blob/master/audiobookshelf.subdomain.conf.sample)
 
-### Synology Reverse Proxy
+### Synology NAS Reverse Proxy Setup (DSM 7+/Quickconnect)
 
-1. Open Control Panel > Application Portal
-2. Change to the Reverse Proxy tab
-3. Select the proxy rule for which you want to enable Websockets and click on Edit
-4. Change to the "Custom Header" tab
-5. Click Create > WebSocket
-6. Click Save
+1. **Open Control Panel**
 
-[from @silentArtifact](https://github.com/advplyr/audiobookshelf/issues/241#issuecomment-1036732329)
+   - Navigate to `Login Portal > Advanced`.
+
+2. **General Tab**
+
+   - Click `Reverse Proxy` > `Create`.
+
+   | Setting            | Value          |
+   | ------------------ | -------------- |
+   | Reverse Proxy Name | audiobookshelf |
+
+3. **Source Configuration**
+
+   | Setting                | Value                                    |
+   | ---------------------- | ---------------------------------------- |
+   | Protocol               | HTTPS                                    |
+   | Hostname               | `<sub>.<quickconnectdomain>.synology.me` |
+   | Port                   | 443                                      |
+   | Access Control Profile | Leave as is                              |
+
+   - Example Hostname: `audiobookshelf.mydomain.synology.me`
+
+4. **Destination Configuration**
+
+   | Setting  | Value       |
+   | -------- | ----------- |
+   | Protocol | HTTP        |
+   | Hostname | Your NAS IP |
+   | Port     | 13378       |
+
+5. **Custom Header Tab**
+
+   - Go to `Create > Websocket`.
+   - Configure Headers (leave as is):
+
+   | Header Name | Value                 |
+   | ----------- | --------------------- |
+   | Upgrade     | `$http_upgrade`       |
+   | Connection  | `$connection_upgrade` |
+
+6. **Advanced Settings Tab**
+   - Leave as is.
 
 ### [Traefik Reverse Proxy](https://doc.traefik.io/traefik/)
 
@@ -170,8 +253,7 @@ Middleware relating to CORS will cause the app to report Unknown Error when logg
    <li>accessControlMaxAge</li>
 </ul>
 
-From [@Dondochaka](https://discord.com/channels/942908292873723984/942914154254176257/945074590374318170) and [@BeastleeUK](https://discord.com/channels/942908292873723984/942914154254176257/970366039294611506)
-<br />
+From [@Dondochaka](https://discord.com/channels/942908292873723984/942914154254176257/945074590374318170) and [@BeastleeUK](https://discord.com/channels/942908292873723984/942914154254176257/970366039294611506) <br />
 
 ### Example Caddyfile - [Caddy Reverse Proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 
@@ -182,6 +264,88 @@ subdomain.domain.com {
 }
 ```
 
+### HAProxy
+
+Below is a generic HAProxy config, using `audiobookshelf.YOUR_DOMAIN.COM`.
+
+To use `http2`, `ssl` is needed.
+
+```make
+global
+    # ... (your global settings go here)
+
+defaults
+    mode http
+    # ... (your default settings go here)
+
+frontend my_frontend
+    # Bind to port 443, enable SSL, and specify the certificate list file
+    bind :443 name :443 ssl crt-list /path/to/cert.crt_list alpn h2,http/1.1
+    mode http
+
+    # Define an ACL for subdomains starting with "audiobookshelf"
+    acl is_audiobookshelf hdr_beg(host) -i audiobookshelf
+
+    # Use the ACL to route traffic to audiobookshelf_backend if the condition is met,
+    # otherwise, use the default_backend
+    use_backend audiobookshelf_backend if is_audiobookshelf
+    default_backend default_backend
+
+backend audiobookshelf_backend
+    mode http
+    # ... (backend settings for audiobookshelf go here)
+
+    # Define the server for the audiobookshelf backend
+    server audiobookshelf_server 127.0.0.99:13378
+
+backend default_backend
+    mode http
+    # ... (default backend settings go here)
+
+    # Define the server for the default backend
+    server default_server 127.0.0.123:8081
+
+```
+
+### pfSense and HAProxy
+
+For pfSense the inputs are graphical, and `Health checking` is enabled.
+
+#### Frontend, Default backend, access control lists and actions
+
+##### Access Control lists
+
+|      Name      |    Expression     | CS  | Not |      Value      |
+| :------------: | :---------------: | :-: | :-: | :-------------: |
+| audiobookshelf | Host starts with: |     |     | audiobookshelf. |
+
+##### Actions
+
+The `condition acl names` needs to match the name above `audiobookshelf`.
+
+|    Action     |   Parameters   | Condition acl names |
+| :-----------: | :------------: | :-----------------: |
+| `Use Backend` | audiobookshelf |   audiobookshelf    |
+
+#### Backend
+
+The `Name` needs to match the `Parameters` above `audiobookshelf`.
+
+| Name | audiobookshelf |
+| ---- | -------------- |
+
+##### Server list:
+
+|      Name      |    Expression     | CS  | Not |      Value      |
+| :------------: | :---------------: | :-: | :-: | :-------------: |
+| audiobookshelf | Host starts with: |     |     | audiobookshelf. |
+
+##### Health checking:
+
+Health checking is enabled by default. `Http check method` of `OPTIONS` is not supported on Audiobookshelf. If Health check fails, data will not be forwared. Need to do one of following:
+
+- To disable: Change `Health check method` to `none`.
+- To make Health checking function: Change `Http check method` to `HEAD` or `GET`.
 
 # Run from source
 
@@ -189,14 +353,20 @@ subdomain.domain.com {
 
 This application is built using [NodeJs](https://nodejs.org/).
 
+### Localization
+
+Thank you to [Weblate](https://hosted.weblate.org/engage/audiobookshelf/) for hosting our localization infrastructure pro-bono. If you want to see Audiobookshelf in your language, please help us localize. Additional information on helping with the translations [here](https://www.audiobookshelf.org/faq#how-do-i-help-with-translations). <a href="https://hosted.weblate.org/engage/audiobookshelf/"> <img src="https://hosted.weblate.org/widget/audiobookshelf/abs-web-client/horizontal-auto.svg" alt="Translation status" /> </a>
+
 ### Dev Container Setup
+
 The easiest way to begin developing this project is to use a dev container. An introduction to dev containers in VSCode can be found [here](https://code.visualstudio.com/docs/devcontainers/containers).
 
 Required Software:
-* [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-* [VSCode](https://code.visualstudio.com/download)
 
-*Note, it is possible to use other container software than Docker and IDEs other than VSCode. However, this setup is more complicated and not covered here.*
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [VSCode](https://code.visualstudio.com/download)
+
+_Note, it is possible to use other container software than Docker and IDEs other than VSCode. However, this setup is more complicated and not covered here._
 
 <div>
 <details>
@@ -249,7 +419,7 @@ You are now ready to start development!
 
 ### Manual Environment Setup
 
-If you don't want to use the dev container, you can still develop this project. First, you will need to install [NodeJs](https://nodejs.org/) (version 16) and [FFmpeg](https://ffmpeg.org/).
+If you don't want to use the dev container, you can still develop this project. First, you will need to install [NodeJs](https://nodejs.org/) (version 20) and [FFmpeg](https://ffmpeg.org/).
 
 Next you will need to create a `dev.js` file in the project's root directory. This contains configuration information and paths unique to your development environment. You can find an example of this file in `.devcontainer/dev.js`.
 
@@ -273,10 +443,9 @@ You can also build a version of the client that supports live reloading. To do t
 
 If you are using VSCode, this project includes a couple of pre-defined targets to speed up this process. First, if you build the project (`ctrl+shift+b` or `cmd+shift+b`) it will automatically generate the client. Next, there are debug commands for running the server and client. You can view these targets using the debug panel (bring it up with (`ctrl+shift+d` or `cmd+shift+d`):
 
-* `Debug server`—Run the server.
-* `Debug client (nuxt)`—Run the client with live reload.
-* `Debug server and client (nuxt)`—Runs both the preceding two debug targets.
-
+- `Debug server`—Run the server.
+- `Debug client (nuxt)`—Run the client with live reload.
+- `Debug server and client (nuxt)`—Runs both the preceding two debug targets.
 
 # How to Support
 

@@ -4,7 +4,7 @@
       <nuxt-link :to="`/config/users/${user.id}`" class="text-white text-opacity-70 hover:text-opacity-100 hover:bg-white hover:bg-opacity-5 cursor-pointer rounded-full px-2 sm:px-0">
         <div class="flex items-center">
           <div class="h-10 w-10 flex items-center justify-center">
-            <span class="material-icons text-2xl">arrow_back</span>
+            <span class="material-symbols text-2xl">arrow_back</span>
           </div>
           <p class="pl-1">{{ $strings.LabelBackToUser }}</p>
         </div>
@@ -36,8 +36,8 @@
               <td class="hidden md:table-cell">
                 <p class="text-xs">{{ getPlayMethodName(session.playMethod) }}</p>
               </td>
-              <td class="hidden sm:table-cell">
-                <p class="text-xs" v-html="getDeviceInfoString(session.deviceInfo)" />
+              <td class="hidden sm:table-cell min-w-32 max-w-32">
+                <p class="text-xs truncate" v-html="getDeviceInfoString(session.deviceInfo)" />
               </td>
               <td class="text-center">
                 <p class="text-xs font-mono">{{ $elapsedPretty(session.timeListening) }}</p>
@@ -54,7 +54,7 @@
           </table>
           <div class="flex items-center justify-end py-1">
             <ui-icon-btn icon="arrow_back_ios_new" :size="7" icon-font-size="1rem" class="mx-1" :disabled="currentPage === 0" @click="prevPage" />
-            <p class="text-sm mx-1">Page {{ currentPage + 1 }} of {{ numPages }}</p>
+            <p class="text-sm mx-1">{{ $getString('LabelPaginationPageXOfY', [currentPage + 1, numPages]) }}</p>
             <ui-icon-btn icon="arrow_forward_ios" :size="7" icon-font-size="1rem" class="mx-1" :disabled="currentPage >= numPages - 1" @click="nextPage" />
           </div>
         </div>
@@ -127,12 +127,13 @@ export default {
       })
 
       if (!libraryItem) {
-        this.$toast.error('Failed to get library item')
+        this.$toast.error(this.$strings.ToastFailedToLoadData)
         this.processingGoToTimestamp = false
         return
       }
       if (session.episodeId && !libraryItem.media.episodes.some((ep) => ep.id === session.episodeId)) {
-        this.$toast.error('Failed to get podcast episode')
+        console.error('Episode not found in library item', session.episodeId, libraryItem.media.episodes)
+        this.$toast.error(this.$strings.ToastFailedToLoadData)
         this.processingGoToTimestamp = false
         return
       }
@@ -146,7 +147,7 @@ export default {
           episodeId: episode.id,
           title: episode.title,
           subtitle: libraryItem.media.metadata.title,
-          caption: episode.publishedAt ? `Published ${this.$formatDate(episode.publishedAt, this.dateFormat)}` : 'Unknown publish date',
+          caption: episode.publishedAt ? this.$getString('LabelPublishedDate', [this.$formatDate(episode.publishedAt, this.dateFormat)]) : this.$strings.LabelUnknownPublishDate,
           duration: episode.audioFile.duration || null,
           coverPath: libraryItem.media.coverPath || null
         }
@@ -193,6 +194,7 @@ export default {
     getDeviceInfoString(deviceInfo) {
       if (!deviceInfo) return ''
       var lines = []
+      if (deviceInfo.clientName) lines.push(`${deviceInfo.clientName} ${deviceInfo.clientVersion || ''}`)
       if (deviceInfo.osName) lines.push(`${deviceInfo.osName} ${deviceInfo.osVersion}`)
       if (deviceInfo.browserName) lines.push(deviceInfo.browserName)
 
@@ -213,7 +215,7 @@ export default {
         return null
       })
       if (!data) {
-        this.$toast.error('Failed to load listening sessions')
+        this.$toast.error(this.$strings.ToastFailedToLoadData)
         return
       }
 

@@ -3,14 +3,14 @@
     <div v-if="item" class="flex h-16 md:h-20">
       <div class="w-10 min-w-10 md:w-16 md:max-w-16 h-full">
         <div class="flex h-full items-center justify-center">
-          <span class="material-icons drag-handle text-lg md:text-xl">menu</span>
+          <span class="material-symbols drag-handle text-lg md:text-xl">menu</span>
         </div>
       </div>
       <div class="h-full relative flex items-center" :style="{ width: coverWidth + 'px', minWidth: coverWidth + 'px', maxWidth: coverWidth + 'px' }">
         <covers-book-cover :library-item="libraryItem" :width="coverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" />
         <div class="absolute top-0 left-0 bg-black bg-opacity-50 flex items-center justify-center h-full w-full z-10" v-show="isHovering && showPlayBtn">
           <div class="w-8 h-8 bg-white bg-opacity-20 rounded-full flex items-center justify-center hover:bg-opacity-40 cursor-pointer" @click="playClick">
-            <span class="material-icons text-2xl">play_arrow</span>
+            <span class="material-symbols fill text-2xl">play_arrow</span>
           </div>
         </div>
       </div>
@@ -38,7 +38,7 @@
         <div v-if="userCanUpdate" class="mx-1" :class="isHovering ? '' : 'ml-6'">
           <ui-icon-btn icon="edit" borderless @click="clickEdit" />
         </div>
-        <div v-if="userCanDelete" class="mx-1">
+        <div class="mx-1" :class="isHovering ? '' : 'ml-6'">
           <ui-icon-btn icon="close" borderless @click="removeClick" />
         </div>
       </div>
@@ -75,8 +75,7 @@ export default {
   },
   computed: {
     translateDistance() {
-      if (!this.userCanUpdate && !this.userCanDelete) return 'translate-x-0'
-      else if (!this.userCanUpdate || !this.userCanDelete) return '-translate-x-12'
+      if (!this.userCanUpdate) return '-translate-x-12'
       return '-translate-x-24'
     },
     libraryItem() {
@@ -198,7 +197,6 @@ export default {
         .$patch(routepath, updatePayload)
         .then(() => {
           this.isProcessingReadUpdate = false
-          this.$toast.success(updatePayload.isFinished ? this.$strings.ToastItemMarkedAsFinishedSuccess : this.$strings.ToastItemMarkedAsNotFinishedSuccess)
         })
         .catch((error) => {
           console.error('Failed', error)
@@ -220,12 +218,11 @@ export default {
             this.$toast.success(this.$strings.ToastPlaylistRemoveSuccess)
           } else {
             console.log(`Item removed from playlist`, updatedPlaylist)
-            this.$toast.success('Item removed from playlist')
           }
         })
         .catch((error) => {
           console.error('Failed to remove item from playlist', error)
-          this.$toast.error('Failed to remove item from playlist')
+          this.$toast.error(this.$strings.ToastFailedToUpdate)
         })
         .finally(() => {
           this.processingRemove = false

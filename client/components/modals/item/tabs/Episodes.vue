@@ -6,8 +6,8 @@
         <ui-text-input-with-label ref="maxEpisodesInput" v-model="maxEpisodesToDownload" :disabled="checkingNewEpisodes" type="number" :label="$strings.LabelLimit" class="w-16 mr-2" input-class="h-10">
           <div class="flex -mb-0.5">
             <p class="px-1 text-sm font-semibold" :class="{ 'text-gray-400': checkingNewEpisodes }">{{ $strings.LabelLimit }}</p>
-            <ui-tooltip direction="top" text="Max # of episodes to download. Use 0 for unlimited.">
-              <span class="material-icons text-base">info_outlined</span>
+            <ui-tooltip direction="top" :text="$strings.LabelMaxEpisodesToDownload">
+              <span class="material-symbols text-base">info</span>
             </ui-tooltip>
           </div>
         </ui-text-input-with-label>
@@ -20,20 +20,16 @@
       <div v-if="!episodes.length" class="flex my-4 text-center justify-center text-xl">{{ $strings.MessageNoEpisodes }}</div>
       <table v-else class="text-sm tracksTable">
         <tr>
-          <th class="text-left">Sort #</th>
-          <th class="text-left whitespace-nowrap">{{ $strings.LabelEpisode }}</th>
-          <th class="text-left">{{ $strings.EpisodeTitle }}</th>
-          <th class="text-center w-28">{{ $strings.EpisodeDuration }}</th>
-          <th class="text-center w-28">{{ $strings.EpisodeSize }}</th>
+          <th class="text-center w-20 min-w-20">{{ $strings.LabelEpisode }}</th>
+          <th class="text-left">{{ $strings.LabelEpisodeTitle }}</th>
+          <th class="text-center w-28">{{ $strings.LabelEpisodeDuration }}</th>
+          <th class="text-center w-28">{{ $strings.LabelEpisodeSize }}</th>
         </tr>
         <tr v-for="episode in episodes" :key="episode.id">
-          <td class="text-left">
-            <p class="px-4">{{ episode.index }}</p>
+          <td class="text-center w-20 min-w-20">
+            <p>{{ episode.episode }}</p>
           </td>
-          <td class="text-left">
-            <p class="px-4">{{ episode.episode }}</p>
-          </td>
-          <td>
+          <td dir="auto">
             {{ episode.title }}
           </td>
           <td class="font-mono text-center">
@@ -103,7 +99,7 @@ export default {
 
       if (this.maxEpisodesToDownload < 0) {
         this.maxEpisodesToDownload = 3
-        this.$toast.error('Invalid max episodes to download')
+        this.$toast.error(this.$strings.ToastInvalidMaxEpisodesToDownload)
         return
       }
 
@@ -117,6 +113,10 @@ export default {
           return false
         })
         console.log('updateResult', updateResult)
+      } else if (!lastEpisodeCheck) {
+        this.$toast.error(this.$strings.ToastDateTimeInvalidOrIncomplete)
+        this.checkingNewEpisodes = false
+        return false
       }
 
       this.$axios
@@ -124,9 +124,9 @@ export default {
         .then((response) => {
           if (response.episodes && response.episodes.length) {
             console.log('New episodes', response.episodes.length)
-            this.$toast.success(`${response.episodes.length} new episodes found!`)
+            this.$toast.success(this.$getString('ToastNewEpisodesFound', [response.episodes.length]))
           } else {
-            this.$toast.info('No new episodes found')
+            this.$toast.info(this.$strings.ToastNoNewEpisodesFound)
           }
           this.checkingNewEpisodes = false
         })

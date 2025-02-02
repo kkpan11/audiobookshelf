@@ -1,10 +1,7 @@
 const date = require('../libs/dateAndTime')
-const { getId } = require('../utils/index')
-const { PlayMethod } = require('../utils/constants')
-const BookMetadata = require('./metadata/BookMetadata')
-const PodcastMetadata = require('./metadata/PodcastMetadata')
+const uuidv4 = require('uuid').v4
+const serverVersion = require('../../package.json').version
 const DeviceInfo = require('./DeviceInfo')
-const VideoMetadata = require('./metadata/VideoMetadata')
 
 class PlaybackSession {
   constructor(session) {
@@ -12,6 +9,7 @@ class PlaybackSession {
     this.userId = null
     this.libraryId = null
     this.libraryItemId = null
+    this.bookId = null
     this.episodeId = null
 
     this.mediaType = null
@@ -25,6 +23,7 @@ class PlaybackSession {
     this.playMethod = null
     this.mediaPlayer = null
     this.deviceInfo = null
+    this.serverVersion = null
 
     this.date = null
     this.dayOfWeek = null
@@ -39,8 +38,11 @@ class PlaybackSession {
     // Not saved in DB
     this.lastSave = 0
     this.audioTracks = []
-    this.videoTrack = null
     this.stream = null
+    // Used for share sessions
+    this.shareSessionId = null
+    this.mediaItemShareId = null
+    this.coverAspectRatio = null
 
     if (session) {
       this.construct(session)
@@ -53,10 +55,11 @@ class PlaybackSession {
       userId: this.userId,
       libraryId: this.libraryId,
       libraryItemId: this.libraryItemId,
+      bookId: this.bookId,
       episodeId: this.episodeId,
       mediaType: this.mediaType,
-      mediaMetadata: this.mediaMetadata?.toJSON() || null,
-      chapters: (this.chapters || []).map(c => ({ ...c })),
+      mediaMetadata: structuredClone(this.mediaMetadata),
+      chapters: (this.chapters || []).map((c) => ({ ...c })),
       displayTitle: this.displayTitle,
       displayAuthor: this.displayAuthor,
       coverPath: this.coverPath,
@@ -64,6 +67,7 @@ class PlaybackSession {
       playMethod: this.playMethod,
       mediaPlayer: this.mediaPlayer,
       deviceInfo: this.deviceInfo?.toJSON() || null,
+      serverVersion: this.serverVersion,
       date: this.date,
       dayOfWeek: this.dayOfWeek,
       timeListening: this.timeListening,
@@ -74,16 +78,22 @@ class PlaybackSession {
     }
   }
 
+  /**
+   * Session data to send to clients
+   * @param {import('../models/LibraryItem')} [libraryItem]
+   * @returns
+   */
   toJSONForClient(libraryItem) {
     return {
       id: this.id,
       userId: this.userId,
       libraryId: this.libraryId,
       libraryItemId: this.libraryItemId,
+      bookId: this.bookId,
       episodeId: this.episodeId,
       mediaType: this.mediaType,
-      mediaMetadata: this.mediaMetadata?.toJSON() || null,
-      chapters: (this.chapters || []).map(c => ({ ...c })),
+      mediaMetadata: structuredClone(this.mediaMetadata),
+      chapters: (this.chapters || []).map((c) => ({ ...c })),
       displayTitle: this.displayTitle,
       displayAuthor: this.displayAuthor,
       coverPath: this.coverPath,
@@ -91,6 +101,7 @@ class PlaybackSession {
       playMethod: this.playMethod,
       mediaPlayer: this.mediaPlayer,
       deviceInfo: this.deviceInfo?.toJSON() || null,
+      serverVersion: this.serverVersion,
       date: this.date,
       dayOfWeek: this.dayOfWeek,
       timeListening: this.timeListening,
@@ -98,9 +109,8 @@ class PlaybackSession {
       currentTime: this.currentTime,
       startedAt: this.startedAt,
       updatedAt: this.updatedAt,
-      audioTracks: this.audioTracks.map(at => at.toJSON()),
-      videoTrack: this.videoTrack ? this.videoTrack.toJSON() : null,
-      libraryItem: libraryItem.toJSONExpanded()
+      audioTracks: this.audioTracks.map((at) => at.toJSON?.() || { ...at }),
+      libraryItem: libraryItem?.toOldJSONExpanded() || null
     }
   }
 
@@ -109,24 +119,34 @@ class PlaybackSession {
     this.userId = session.userId
     this.libraryId = session.libraryId || null
     this.libraryItemId = session.libraryItemId
+    this.bookId = session.bookId || null
     this.episodeId = session.episodeId
     this.mediaType = session.mediaType
     this.duration = session.duration
     this.playMethod = session.playMethod
     this.mediaPlayer = session.mediaPlayer || null
-    this.deviceInfo = new DeviceInfo(session.deviceInfo)
+
+    // Temp do not store old IDs
+    if (this.libraryId?.startsWith('lib_')) {
+      this.libraryId = null
+    }
+    if (this.libraryItemId?.startsWith('li_') || this.libraryItemId?.startsWith('local_')) {
+      this.libraryItemId = null
+    }
+    if (this.episodeId?.startsWith('ep_') || this.episodeId?.startsWith('local_')) {
+      this.episodeId = null
+    }
+
+    if (session.deviceInfo instanceof DeviceInfo) {
+      this.deviceInfo = new DeviceInfo(session.deviceInfo.toJSON())
+    } else {
+      this.deviceInfo = new DeviceInfo(session.deviceInfo)
+    }
+
+    this.serverVersion = session.serverVersion
     this.chapters = session.chapters || []
 
-    this.mediaMetadata = null
-    if (session.mediaMetadata) {
-      if (this.mediaType === 'book') {
-        this.mediaMetadata = new BookMetadata(session.mediaMetadata)
-      } else if (this.mediaType === 'podcast') {
-        this.mediaMetadata = new PodcastMetadata(session.mediaMetadata)
-      } else if (this.mediaType === 'video') {
-        this.mediaMetadata = new VideoMetadata(session.mediaMetadata)
-      }
-    }
+    this.mediaMetadata = session.mediaMetadata
     this.displayTitle = session.displayTitle || ''
     this.displayAuthor = session.displayAuthor || ''
     this.coverPath = session.coverPath
@@ -138,7 +158,13 @@ class PlaybackSession {
     this.currentTime = session.currentTime || 0
 
     this.startedAt = session.startedAt
-    this.updatedAt = session.updatedAt || null
+    this.updatedAt = session.updatedAt || session.startedAt
+
+    // Local playback sessions dont set this date field so set using updatedAt
+    if (!this.date && session.updatedAt) {
+      this.date = date.format(new Date(session.updatedAt), 'YYYY-MM-DD')
+      this.dayOfWeek = date.format(new Date(session.updatedAt), 'dddd')
+    }
   }
 
   get mediaItemId() {
@@ -146,13 +172,14 @@ class PlaybackSession {
     return this.libraryItemId
   }
 
-  get progress() { // Value between 0 and 1
+  get progress() {
+    // Value between 0 and 1
     if (!this.duration) return 0
     return Math.max(0, Math.min(this.currentTime / this.duration, 1))
   }
 
   get deviceId() {
-    return this.deviceInfo?.deviceId
+    return this.deviceInfo?.id
   }
 
   get deviceDescription() {
@@ -169,27 +196,33 @@ class PlaybackSession {
     }
   }
 
-  setData(libraryItem, user, mediaPlayer, deviceInfo, startTime, episodeId = null) {
-    this.id = getId('play')
-    this.userId = user.id
+  /**
+   *
+   * @param {import('../models/LibraryItem')} libraryItem
+   * @param {*} userId
+   * @param {*} mediaPlayer
+   * @param {*} deviceInfo
+   * @param {*} startTime
+   * @param {*} episodeId
+   */
+  setData(libraryItem, userId, mediaPlayer, deviceInfo, startTime, episodeId = null) {
+    this.id = uuidv4()
+    this.userId = userId
     this.libraryId = libraryItem.libraryId
     this.libraryItemId = libraryItem.id
+    this.bookId = episodeId ? null : libraryItem.media.id
     this.episodeId = episodeId
     this.mediaType = libraryItem.mediaType
-    this.mediaMetadata = libraryItem.media.metadata.clone()
-    this.chapters = (libraryItem.media.chapters || []).map(c => ({ ...c })) // Only book mediaType has chapters
+    this.mediaMetadata = libraryItem.media.oldMetadataToJSON()
+    this.chapters = libraryItem.media.getChapters(episodeId)
     this.displayTitle = libraryItem.media.getPlaybackTitle(episodeId)
     this.displayAuthor = libraryItem.media.getPlaybackAuthor()
     this.coverPath = libraryItem.media.coverPath
-
-    if (episodeId) {
-      this.duration = libraryItem.media.getEpisodeDuration(episodeId)
-    } else {
-      this.duration = libraryItem.media.duration
-    }
+    this.duration = libraryItem.media.getPlaybackDuration(episodeId)
 
     this.mediaPlayer = mediaPlayer
     this.deviceInfo = deviceInfo || new DeviceInfo()
+    this.serverVersion = serverVersion
 
     this.timeListening = 0
     this.startTime = startTime
@@ -212,12 +245,6 @@ class PlaybackSession {
 
     this.timeListening += Number.parseFloat(timeListened)
     this.updatedAt = Date.now()
-  }
-
-  // New date since start of listening session
-  checkDateRollover() {
-    if (!this.date) return false
-    return date.format(new Date(), 'YYYY-MM-DD') !== this.date
   }
 }
 module.exports = PlaybackSession

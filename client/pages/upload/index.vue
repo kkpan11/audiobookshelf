@@ -1,16 +1,30 @@
 <template>
-  <div id="page-wrapper" class="page p-0 sm:p-6 overflow-y-auto" :class="streamLibraryItem ? 'streaming' : ''">
+  <div id="page-wrapper" class="page p-1 sm:p-6 overflow-y-auto" :class="streamLibraryItem ? 'streaming' : ''">
     <div class="w-full max-w-6xl mx-auto">
       <!-- Library & folder picker -->
-      <div class="flex my-6 -mx-2">
-        <div class="w-1/5 px-2">
+      <div class="flex flex-wrap my-6 md:-mx-2">
+        <div class="w-full md:w-1/5 px-2">
           <ui-dropdown v-model="selectedLibraryId" :items="libraryItems" :label="$strings.LabelLibrary" :disabled="!!items.length" @input="libraryChanged" />
         </div>
-        <div class="w-3/5 px-2">
+        <div class="w-full md:w-3/5 px-2">
           <ui-dropdown v-model="selectedFolderId" :items="folderItems" :disabled="!selectedLibraryId || !!items.length" :label="$strings.LabelFolder" />
         </div>
-        <div class="w-1/5 px-2">
+        <div class="w-full md:w-1/5 px-2">
           <ui-text-input-with-label :value="selectedLibraryMediaType" readonly :label="$strings.LabelMediaType" />
+        </div>
+      </div>
+
+      <div v-if="!selectedLibraryIsPodcast" class="flex items-center mb-6 px-2 md:px-0">
+        <label class="flex cursor-pointer pt-4">
+          <ui-toggle-switch v-model="fetchMetadata.enabled" class="inline-flex" />
+          <span class="pl-2 text-base">{{ $strings.LabelAutoFetchMetadata }}</span>
+        </label>
+        <ui-tooltip :text="$strings.LabelAutoFetchMetadataHelp" class="inline-flex pt-4">
+          <span class="pl-1 material-symbols icon-text text-sm cursor-pointer">info</span>
+        </ui-tooltip>
+
+        <div class="flex-grow ml-4">
+          <ui-dropdown v-model="fetchMetadata.provider" :items="providers" :label="$strings.LabelProvider" />
         </div>
       </div>
 
@@ -19,13 +33,13 @@
       </widgets-alert>
 
       <!-- Picker display -->
-      <div v-if="!items.length && !ignoredFiles.length" class="w-full mx-auto border border-white border-opacity-20 px-12 pt-12 pb-4 my-12 relative" :class="isDragging ? 'bg-primary bg-opacity-40' : 'border-dashed'">
-        <p class="text-2xl text-center">{{ isDragging ? $strings.LabelUploaderDropFiles : $strings.LabelUploaderDragAndDrop }}</p>
+      <div v-if="!items.length && !ignoredFiles.length" class="w-full mx-auto border border-white border-opacity-20 px-4 md:px-12 pt-12 pb-4 my-12 relative" :class="isDragging ? 'bg-primary bg-opacity-40' : 'border-dashed'">
+        <p class="text-2xl text-center">{{ isDragging ? $strings.LabelUploaderDropFiles : isIOS ? $strings.LabelUploaderDragAndDropFilesOnly : $strings.LabelUploaderDragAndDrop }}</p>
         <p class="text-center text-sm my-5">{{ $strings.MessageOr }}</p>
         <div class="w-full max-w-xl mx-auto">
           <div class="flex">
             <ui-btn class="w-full mx-1" @click="openFilePicker">{{ $strings.ButtonChooseFiles }}</ui-btn>
-            <ui-btn class="w-full mx-1" @click="openFolderPicker">{{ $strings.ButtonChooseAFolder }}</ui-btn>
+            <ui-btn v-if="!isIOS" class="w-full mx-1" @click="openFolderPicker">{{ $strings.ButtonChooseAFolder }} </ui-btn>
           </div>
         </div>
         <div class="pt-8 text-center">
@@ -34,7 +48,7 @@
           </p>
 
           <p class="text-sm text-white text-opacity-70">
-            {{ $strings.NoteUploaderFoldersWithMediaFiles }} <span v-if="selectedLibraryMediaType === 'book'">{{ $strings.NoteUploaderOnlyAudioFiles }}</span>
+            <span v-if="!isIOS">{{ $strings.NoteUploaderFoldersWithMediaFiles }}</span> <span v-if="selectedLibraryMediaType === 'book'">{{ $strings.NoteUploaderOnlyAudioFiles }}</span>
           </p>
         </div>
       </div>
@@ -61,9 +75,7 @@
       </widgets-alert>
 
       <!-- Item Upload cards -->
-      <template v-for="item in items">
-        <cards-item-upload-card :ref="`itemCard-${item.index}`" :key="item.index" :media-type="selectedLibraryMediaType" :item="item" :processing="processing" @remove="removeItem(item)" />
-      </template>
+      <cards-item-upload-card v-for="item in items" :key="item.index" :ref="`itemCard-${item.index}`" :media-type="selectedLibraryMediaType" :item="item" :provider="fetchMetadata.provider" :processing="processing" @remove="removeItem(item)" />
 
       <!-- Upload/Reset btns -->
       <div v-show="items.length" class="flex justify-end pb-8 pt-4">
@@ -72,12 +84,13 @@
       </div>
     </div>
 
-    <input ref="fileInput" type="file" multiple :accept="inputAccept" class="hidden" @change="inputChanged" />
-    <input ref="fileFolderInput" type="file" webkitdirectory multiple :accept="inputAccept" class="hidden" @change="inputChanged" />
+    <input ref="fileInput" type="file" multiple :accept="isIOS ? '' : inputAccept" class="hidden" @change="inputChanged" />
+    <input ref="fileFolderInput" type="file" webkitdirectory multiple :accept="inputAccept" class="hidden" @change="inputChanged" v-if="!isIOS" />
   </div>
 </template>
 
 <script>
+import Path from 'path'
 import uploadHelpers from '@/mixins/uploadHelpers'
 
 export default {
@@ -91,13 +104,18 @@ export default {
       selectedLibraryId: null,
       selectedFolderId: null,
       processing: false,
-      uploadFinished: false
+      uploadFinished: false,
+      fetchMetadata: {
+        enabled: false,
+        provider: null
+      }
     }
   },
   watch: {
     selectedLibrary(newVal) {
       if (newVal && !this.selectedFolderId) {
         this.setDefaultFolder()
+        this.setMetadataProvider()
       }
     }
   },
@@ -108,6 +126,10 @@ export default {
         extensions = extensions.concat(types.map((t) => `.${t}`))
       })
       return extensions
+    },
+    isIOS() {
+      const ua = window.navigator.userAgent
+      return /iPad|iPhone|iPod/.test(ua) && !window.MSStream
     },
     streamLibraryItem() {
       return this.$store.state.streamLibraryItem
@@ -131,6 +153,13 @@ export default {
     },
     selectedLibraryIsPodcast() {
       return this.selectedLibraryMediaType === 'podcast'
+    },
+    providers() {
+      if (this.selectedLibraryIsPodcast) return this.$store.state.scanners.podcastProviders
+      return this.$store.state.scanners.providers
+    },
+    canFetchMetadata() {
+      return !this.selectedLibraryIsPodcast && this.fetchMetadata.enabled
     },
     selectedFolder() {
       if (!this.selectedLibrary) return null
@@ -159,11 +188,15 @@ export default {
         }
       }
       this.setDefaultFolder()
+      this.setMetadataProvider()
     },
     setDefaultFolder() {
       if (!this.selectedFolderId && this.selectedLibrary && this.selectedLibrary.folders.length) {
         this.selectedFolderId = this.selectedLibrary.folders[0].id
       }
+    },
+    setMetadataProvider() {
+      this.fetchMetadata.provider ||= this.$store.getters['libraries/getLibraryProvider'](this.selectedLibraryId)
     },
     removeItem(item) {
       this.items = this.items.filter((b) => b.index !== item.index)
@@ -212,27 +245,49 @@ export default {
       var items = e.dataTransfer.items || []
 
       var itemResults = await this.uploadHelpers.getItemsFromDrop(items, this.selectedLibraryMediaType)
-      this.setResults(itemResults)
+      this.onItemsSelected(itemResults)
     },
     inputChanged(e) {
       if (!e.target || !e.target.files) return
       var _files = Array.from(e.target.files)
       if (_files && _files.length) {
         var itemResults = this.uploadHelpers.getItemsFromPicker(_files, this.selectedLibraryMediaType)
-        this.setResults(itemResults)
+        this.onItemsSelected(itemResults)
       }
     },
-    setResults(itemResults) {
+    onItemsSelected(itemResults) {
+      if (this.itemSelectionSuccessful(itemResults)) {
+        // setTimeout ensures the new item ref is attached before this method is called
+        setTimeout(this.attemptMetadataFetch, 0)
+      }
+    },
+    itemSelectionSuccessful(itemResults) {
+      console.log('Upload results', itemResults)
+
       if (itemResults.error) {
         this.error = itemResults.error
         this.items = []
         this.ignoredFiles = []
-      } else {
-        this.error = ''
-        this.items = itemResults.items
-        this.ignoredFiles = itemResults.ignoredFiles
+        return false
       }
-      console.log('Upload results', itemResults)
+
+      this.error = ''
+      this.items = itemResults.items
+      this.ignoredFiles = itemResults.ignoredFiles
+      return true
+    },
+    attemptMetadataFetch() {
+      if (!this.canFetchMetadata) {
+        return false
+      }
+
+      this.items.forEach((item) => {
+        let itemRef = this.$refs[`itemCard-${item.index}`]
+
+        if (itemRef?.length) {
+          itemRef[0].fetchMetadata(this.fetchMetadata.provider)
+        }
+      })
     },
     updateItemCardStatus(index, status) {
       var ref = this.$refs[`itemCard-${index}`]
@@ -243,12 +298,12 @@ export default {
         ref.setUploadStatus(status)
       }
     },
-    uploadItem(item) {
+    async uploadItem(item) {
       var form = new FormData()
       form.set('title', item.title)
       if (!this.selectedLibraryIsPodcast) {
-        form.set('author', item.author)
-        form.set('series', item.series)
+        form.set('author', item.author || '')
+        form.set('series', item.series || '')
       }
       form.set('library', this.selectedLibraryId)
       form.set('folder', this.selectedFolderId)
@@ -294,27 +349,44 @@ export default {
         return
       }
 
-      var items = this.validateItems()
+      const items = this.validateItems()
       if (!items) {
         this.$toast.error('Some invalid items')
         return
       }
       this.processing = true
-      var itemsUploaded = 0
-      var itemsFailed = 0
-      for (let i = 0; i < items.length; i++) {
-        var item = items[i]
+
+      const itemsToUpload = []
+
+      // Check if path already exists before starting upload
+      //  uploading fails if path already exists
+      for (const item of items) {
+        const filepath = Path.join(this.selectedFolder.fullPath, item.directory)
+        const exists = await this.$axios
+          .$post(`/api/filesystem/pathexists`, { filepath })
+          .then((data) => {
+            if (data.exists) {
+              this.$toast.error(`Filepath "${filepath}" already exists on server`)
+            }
+            return data.exists
+          })
+          .catch((error) => {
+            console.error('Failed to check if filepath exists', error)
+            return false
+          })
+        if (!exists) {
+          itemsToUpload.push(item)
+        }
+      }
+
+      let itemsUploaded = 0
+      let itemsFailed = 0
+      for (const item of itemsToUpload) {
         this.updateItemCardStatus(item.index, 'uploading')
-        var result = await this.uploadItem(item)
+        const result = await this.uploadItem(item)
         if (result) itemsUploaded++
         else itemsFailed++
         this.updateItemCardStatus(item.index, result ? 'success' : 'failed')
-      }
-      if (itemsUploaded) {
-        this.$toast.success(`Successfully uploaded ${itemsUploaded} item${itemsUploaded > 1 ? 's' : ''}`)
-      }
-      if (itemsFailed) {
-        this.$toast.success(`Failed to upload ${itemsFailed} item${itemsFailed > 1 ? 's' : ''}`)
       }
       this.processing = false
       this.uploadFinished = true
@@ -322,6 +394,8 @@ export default {
   },
   mounted() {
     this.selectedLibraryId = this.$store.state.libraries.currentLibraryId
+    this.setMetadataProvider()
+
     this.setDefaultFolder()
     window.addEventListener('dragenter', this.dragenter)
     window.addEventListener('dragleave', this.dragleave)

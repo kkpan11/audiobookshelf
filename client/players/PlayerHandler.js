@@ -1,8 +1,6 @@
 import LocalAudioPlayer from './LocalAudioPlayer'
-import LocalVideoPlayer from './LocalVideoPlayer'
 import CastPlayer from './CastPlayer'
 import AudioTrack from './AudioTrack'
-import VideoTrack from './VideoTrack'
 
 export default class PlayerHandler {
   constructor(ctx) {
@@ -16,15 +14,12 @@ export default class PlayerHandler {
     this.player = null
     this.playerState = 'IDLE'
     this.isHlsTranscode = false
-    this.isVideo = false
-    this.isMusic = false
     this.currentSessionId = null
     this.startTimeOverride = undefined // Used for starting playback at a specific time (i.e. clicking bookmark from library item page)
     this.startTime = 0
 
     this.failedProgressSyncs = 0
     this.lastSyncTime = 0
-    this.lastSyncedAt = 0
     this.listeningTimeSinceSync = 0
 
     this.playInterval = null
@@ -37,10 +32,10 @@ export default class PlayerHandler {
     return this.libraryItem ? this.libraryItem.id : null
   }
   get isPlayingCastedItem() {
-    return this.libraryItem && (this.player instanceof CastPlayer)
+    return this.libraryItem && this.player instanceof CastPlayer
   }
   get isPlayingLocalItem() {
-    return this.libraryItem && (this.player instanceof LocalAudioPlayer)
+    return this.libraryItem && this.player instanceof LocalAudioPlayer
   }
   get userToken() {
     return this.ctx.$store.getters['user/getToken']
@@ -50,19 +45,28 @@ export default class PlayerHandler {
   }
   get episode() {
     if (!this.episodeId) return null
-    return this.libraryItem.media.episodes.find(ep => ep.id === this.episodeId)
+    return this.libraryItem.media.episodes.find((ep) => ep.id === this.episodeId)
+  }
+  get jumpForwardAmount() {
+    return this.ctx.$store.getters['user/getUserSetting']('jumpForwardAmount')
+  }
+  get jumpBackwardAmount() {
+    return this.ctx.$store.getters['user/getUserSetting']('jumpBackwardAmount')
+  }
+
+  setSessionId(sessionId) {
+    this.currentSessionId = sessionId
+    this.ctx.$store.commit('setPlaybackSessionId', sessionId)
   }
 
   load(libraryItem, episodeId, playWhenReady, playbackRate, startTimeOverride = undefined) {
     this.libraryItem = libraryItem
-    this.isVideo = libraryItem.mediaType === 'video'
-    this.isMusic = libraryItem.mediaType === 'music'
 
     this.episodeId = episodeId
     this.playWhenReady = playWhenReady
-    this.initialPlaybackRate = this.isMusic ? 1 : playbackRate
+    this.initialPlaybackRate = playbackRate
 
-    this.startTimeOverride = (startTimeOverride == null || isNaN(startTimeOverride)) ? undefined : Number(startTimeOverride)
+    this.startTimeOverride = startTimeOverride == null || isNaN(startTimeOverride) ? undefined : Number(startTimeOverride)
 
     if (!this.player) this.switchPlayer(playWhenReady)
     else this.prepare()
@@ -87,7 +91,7 @@ export default class PlayerHandler {
         this.playWhenReady = playWhenReady
         this.prepare()
       }
-    } else if (!this.isCasting && !(this.player instanceof LocalAudioPlayer) && !(this.player instanceof LocalVideoPlayer)) {
+    } else if (!this.isCasting && !(this.player instanceof LocalAudioPlayer)) {
       console.log('[PlayerHandler] Switching to local player')
 
       this.stopPlayInterval()
@@ -97,11 +101,7 @@ export default class PlayerHandler {
         this.player.destroy()
       }
 
-      if (this.isVideo) {
-        this.player = new LocalVideoPlayer(this.ctx)
-      } else {
-        this.player = new LocalAudioPlayer(this.ctx)
-      }
+      this.player = new LocalAudioPlayer(this.ctx)
 
       this.setPlayerListeners()
 
@@ -123,7 +123,7 @@ export default class PlayerHandler {
 
   playerError() {
     // Switch to HLS stream on error
-    if (!this.isCasting && !this.currentStreamId && (this.player instanceof LocalAudioPlayer)) {
+    if (!this.isCasting && this.player instanceof LocalAudioPlayer) {
       console.log(`[PlayerHandler] Audio player error switching to HLS stream`)
       this.prepare(true)
     }
@@ -183,14 +183,17 @@ export default class PlayerHandler {
   }
 
   async prepare(forceTranscode = false) {
+    this.setSessionId(null) // Reset session
+
     const payload = {
       deviceInfo: {
+        clientName: 'Abs Web',
         deviceId: this.getDeviceId()
       },
       supportedMimeTypes: this.player.playableMimeTypes,
       mediaPlayer: this.isCasting ? 'chromecast' : 'html5',
       forceTranscode,
-      forceDirectPlay: this.isCasting || this.isVideo // TODO: add transcode support for chromecast
+      forceDirectPlay: this.isCasting // TODO: add transcode support for chromecast
     }
 
     const path = this.episodeId ? `/api/items/${this.libraryItem.id}/play/${this.episodeId}` : `/api/items/${this.libraryItem.id}/play`
@@ -200,14 +203,16 @@ export default class PlayerHandler {
     this.prepareSession(session)
   }
 
-  prepareOpenSession(session, playbackRate) { // Session opened on init socket
+  prepareOpenSession(session, playbackRate) {
+    // Session opened on init socket
     if (!this.player) this.switchPlayer() // Must set player first for open sessions
 
     this.libraryItem = session.libraryItem
-    this.isVideo = session.libraryItem.mediaType === 'video'
     this.playWhenReady = false
     this.initialPlaybackRate = playbackRate
     this.startTimeOverride = undefined
+    this.lastSyncTime = 0
+    this.listeningTimeSinceSync = 0
 
     this.prepareSession(session)
   }
@@ -215,33 +220,21 @@ export default class PlayerHandler {
   prepareSession(session) {
     this.failedProgressSyncs = 0
     this.startTime = this.startTimeOverride !== undefined ? this.startTimeOverride : session.currentTime
-    this.currentSessionId = session.id
+    this.setSessionId(session.id)
     this.displayTitle = session.displayTitle
     this.displayAuthor = session.displayAuthor
 
     console.log('[PlayerHandler] Preparing Session', session)
 
-    if (session.videoTrack) {
-      var videoTrack = new VideoTrack(session.videoTrack, this.userToken)
+    var audioTracks = session.audioTracks.map((at) => new AudioTrack(at, this.userToken, this.ctx.$config.routerBasePath))
 
-      this.ctx.playerLoading = true
-      this.isHlsTranscode = true
-      if (session.playMethod === this.ctx.$constants.PlayMethod.DIRECTPLAY) {
-        this.isHlsTranscode = false
-      }
-
-      this.player.set(this.libraryItem, videoTrack, this.isHlsTranscode, this.startTime, this.playWhenReady)
-    } else {
-      var audioTracks = session.audioTracks.map(at => new AudioTrack(at, this.userToken))
-
-      this.ctx.playerLoading = true
-      this.isHlsTranscode = true
-      if (session.playMethod === this.ctx.$constants.PlayMethod.DIRECTPLAY) {
-        this.isHlsTranscode = false
-      }
-
-      this.player.set(this.libraryItem, audioTracks, this.isHlsTranscode, this.startTime, this.playWhenReady)
+    this.ctx.playerLoading = true
+    this.isHlsTranscode = true
+    if (session.playMethod === this.ctx.$constants.PlayMethod.DIRECTPLAY) {
+      this.isHlsTranscode = false
     }
+
+    this.player.set(this.libraryItem, audioTracks, this.isHlsTranscode, this.startTime, this.playWhenReady)
 
     // browser media session api
     this.ctx.setMediaSession()
@@ -260,6 +253,7 @@ export default class PlayerHandler {
     this.player = null
     this.playerState = 'IDLE'
     this.libraryItem = null
+    this.setSessionId(null)
     this.startTime = 0
     this.stopPlayInterval()
   }
@@ -272,6 +266,10 @@ export default class PlayerHandler {
     }
   }
 
+  /**
+   * First sync happens after 20 seconds
+   * subsequent syncs happen every 10 seconds
+   */
   startPlayInterval() {
     clearInterval(this.playInterval)
     let lastTick = Date.now()
@@ -281,10 +279,11 @@ export default class PlayerHandler {
       const currentTime = this.player.getCurrentTime()
       this.ctx.setCurrentTime(currentTime)
 
-      const exactTimeElapsed = ((Date.now() - lastTick) / 1000)
+      const exactTimeElapsed = (Date.now() - lastTick) / 1000
       lastTick = Date.now()
       this.listeningTimeSinceSync += exactTimeElapsed
-      if (this.listeningTimeSinceSync >= 5) {
+      const TimeToWaitBeforeSync = this.lastSyncTime > 0 ? 10 : 20
+      if (this.listeningTimeSinceSync >= TimeToWaitBeforeSync) {
         this.sendProgressSync(currentTime)
       }
     }, 1000)
@@ -294,21 +293,22 @@ export default class PlayerHandler {
     let syncData = null
     if (this.player) {
       const listeningTimeToAdd = Math.max(0, Math.floor(this.listeningTimeSinceSync))
-      syncData = {
-        timeListened: listeningTimeToAdd,
-        duration: this.getDuration(),
-        currentTime: this.getCurrentTime()
+      // When opening player and quickly closing dont save progress
+      if (listeningTimeToAdd > 20) {
+        syncData = {
+          timeListened: listeningTimeToAdd,
+          currentTime: this.getCurrentTime()
+        }
       }
     }
     this.listeningTimeSinceSync = 0
-    return this.ctx.$axios.$post(`/api/session/${this.currentSessionId}/close`, syncData, { timeout: 1000 }).catch((error) => {
+    this.lastSyncTime = 0
+    return this.ctx.$axios.$post(`/api/session/${this.currentSessionId}/close`, syncData, { timeout: 6000, progress: false }).catch((error) => {
       console.error('Failed to close session', error)
     })
   }
 
   sendProgressSync(currentTime) {
-    if (this.isMusic) return
-
     const diffSinceLastSync = Math.abs(this.lastSyncTime - currentTime)
     if (diffSinceLastSync < 1) return
 
@@ -316,20 +316,24 @@ export default class PlayerHandler {
     const listeningTimeToAdd = Math.max(0, Math.floor(this.listeningTimeSinceSync))
     const syncData = {
       timeListened: listeningTimeToAdd,
-      duration: this.getDuration(),
       currentTime
     }
+
     this.listeningTimeSinceSync = 0
-    this.ctx.$axios.$post(`/api/session/${this.currentSessionId}/sync`, syncData, { timeout: 3000 }).then(() => {
-      this.failedProgressSyncs = 0
-    }).catch((error) => {
-      console.error('Failed to update session progress', error)
-      this.failedProgressSyncs++
-      if (this.failedProgressSyncs >= 2) {
-        this.ctx.showFailedProgressSyncs()
+    this.ctx.$axios
+      .$post(`/api/session/${this.currentSessionId}/sync`, syncData, { timeout: 9000, progress: false })
+      .then(() => {
         this.failedProgressSyncs = 0
-      }
-    })
+      })
+      .catch((error) => {
+        console.error('Failed to update session progress', error)
+        // After 4 failed sync attempts show an alert toast
+        this.failedProgressSyncs++
+        if (this.failedProgressSyncs >= 4) {
+          this.ctx.showFailedProgressSyncs()
+          this.failedProgressSyncs = 0
+        }
+      })
   }
 
   stopPlayInterval() {
@@ -360,13 +364,15 @@ export default class PlayerHandler {
   jumpBackward() {
     if (!this.player) return
     var currentTime = this.getCurrentTime()
-    this.seek(Math.max(0, currentTime - 10))
+    const jumpAmount = this.jumpBackwardAmount
+    this.seek(Math.max(0, currentTime - jumpAmount))
   }
 
   jumpForward() {
     if (!this.player) return
     var currentTime = this.getCurrentTime()
-    this.seek(Math.min(currentTime + 10, this.getDuration()))
+    const jumpAmount = this.jumpForwardAmount
+    this.seek(Math.min(currentTime + jumpAmount, this.getDuration()))
   }
 
   setVolume(volume) {
@@ -380,13 +386,13 @@ export default class PlayerHandler {
     this.player.setPlaybackRate(playbackRate)
   }
 
-  seek(time) {
+  seek(time, shouldSync = true) {
     if (!this.player) return
     this.player.seek(time, this.playerPlaying)
     this.ctx.setCurrentTime(time)
 
     // Update progress if paused
-    if (!this.playerPlaying) {
+    if (!this.playerPlaying && shouldSync) {
       this.sendProgressSync(time)
     }
   }

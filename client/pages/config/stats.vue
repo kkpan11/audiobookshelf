@@ -1,6 +1,9 @@
 <template>
   <div>
-    <app-settings-content :header-text="$strings.HeaderYourStats">
+    <!-- Year in review banner shown at the top in December and January -->
+    <stats-year-in-review-banner v-if="showYearInReviewBanner" />
+
+    <app-settings-content :header-text="$strings.HeaderYourStats" class="!mb-4">
       <div class="flex justify-center">
         <div class="flex p-2">
           <svg class="hidden sm:block h-14 w-14 lg:h-18 lg:w-18" viewBox="0 0 24 24">
@@ -10,27 +13,27 @@
             />
           </svg>
           <div class="px-3">
-            <p class="text-4xl md:text-5xl font-bold">{{ userItemsFinished.length }}</p>
+            <p class="text-4xl md:text-5xl font-bold">{{ $formatNumber(userItemsFinished.length) }}</p>
             <p class="text-xs md:text-sm text-white text-opacity-80">{{ $strings.LabelStatsItemsFinished }}</p>
           </div>
         </div>
 
         <div class="flex p-2">
           <div class="hidden sm:block">
-            <span class="hidden sm:block material-icons-outlined text-5xl lg:text-6xl">event</span>
+            <span class="hidden sm:block material-symbols text-5xl lg:text-6xl">event</span>
           </div>
           <div class="px-1">
-            <p class="text-4xl md:text-5xl font-bold">{{ totalDaysListened }}</p>
+            <p class="text-4xl md:text-5xl font-bold">{{ $formatNumber(totalDaysListened) }}</p>
             <p class="text-xs md:text-sm text-white text-opacity-80">{{ $strings.LabelStatsDaysListened }}</p>
           </div>
         </div>
 
         <div class="flex p-2">
           <div class="hidden sm:block">
-            <span class="material-icons-outlined text-5xl lg:text-6xl">watch_later</span>
+            <span class="material-symbols text-5xl lg:text-6xl">watch_later</span>
           </div>
           <div class="px-1">
-            <p class="text-4xl md:text-5xl font-bold">{{ totalMinutesListening }}</p>
+            <p class="text-4xl md:text-5xl font-bold">{{ $formatNumber(totalMinutesListening) }}</p>
             <p class="text-xs md:text-sm text-white text-opacity-80">{{ $strings.LabelStatsMinutesListening }}</p>
           </div>
         </div>
@@ -41,7 +44,7 @@
           <div class="flex mb-4 items-center">
             <h1 class="text-2xl">{{ $strings.HeaderStatsRecentSessions }}</h1>
             <div class="flex-grow" />
-            <ui-btn :to="`/config/users/${user.id}/sessions`" class="text-xs" :padding-x="1.5" :padding-y="1">{{ $strings.ButtonViewAll }}</ui-btn>
+            <ui-btn v-if="isAdminOrUp" :to="`/config/users/${user.id}/sessions`" class="text-xs" :padding-x="1.5" :padding-y="1">{{ $strings.ButtonViewAll }}</ui-btn>
           </div>
           <p v-if="!mostRecentListeningSessions.length">{{ $strings.MessageNoListeningSessions }}</p>
           <template v-for="(item, index) in mostRecentListeningSessions">
@@ -63,6 +66,9 @@
       </div>
       <stats-heatmap v-if="listeningStats" :days-listening="listeningStats.days" class="my-2" />
     </app-settings-content>
+
+    <!-- Year in review banner shown at the bottom Feb - Nov -->
+    <stats-year-in-review-banner v-if="!showYearInReviewBanner" />
   </div>
 </template>
 
@@ -71,7 +77,8 @@ export default {
   data() {
     return {
       listeningStats: null,
-      windowWidth: 0
+      windowWidth: 0,
+      showYearInReviewBanner: false
     }
   },
   watch: {
@@ -82,6 +89,9 @@ export default {
     }
   },
   computed: {
+    isAdminOrUp() {
+      return this.$store.getters['user/getIsAdminOrUp']
+    },
     user() {
       return this.$store.state.user.user
     },
@@ -116,7 +126,12 @@ export default {
         console.error('Failed to load listening sesions', err)
         return []
       })
-      console.log('Loaded user listening data', this.listeningStats)
+
+      let month = new Date().getMonth()
+      // January and December show year in review banner
+      if (month === 11 || month === 0) {
+        this.showYearInReviewBanner = true
+      }
     }
   },
   mounted() {

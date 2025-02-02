@@ -2,15 +2,9 @@
   <div class="flex items-center h-full px-1 overflow-hidden">
     <covers-book-cover :library-item="libraryItem" :width="coverWidth" :book-cover-aspect-ratio="bookCoverAspectRatio" />
     <div class="flex-grow px-2 audiobookSearchCardContent">
-      <p v-if="matchKey !== 'title'" class="truncate text-sm">{{ title }}</p>
-      <p v-else class="truncate text-sm" v-html="matchHtml" />
-
-      <p v-if="matchKey === 'subtitle'" class="truncate text-xs text-gray-300">{{ matchHtml }}</p>
-
-      <p v-if="matchKey !== 'authors'" class="text-xs text-gray-200 truncate">by {{ authorName }}</p>
-      <p v-else class="truncate text-xs text-gray-200" v-html="matchHtml" />
-
-      <div v-if="matchKey === 'series' || matchKey === 'tags' || matchKey === 'isbn' || matchKey === 'asin' || matchKey === 'episode'" class="m-0 p-0 truncate text-xs" v-html="matchHtml" />
+      <p class="truncate text-sm">{{ title }}</p>
+      <p v-if="subtitle" class="truncate text-xs text-gray-300">{{ subtitle }}</p>
+      <p class="text-xs text-gray-200 truncate">{{ $getString('LabelByAuthor', [authorName]) }}</p>
     </div>
   </div>
 </template>
@@ -21,10 +15,7 @@ export default {
     libraryItem: {
       type: Object,
       default: () => {}
-    },
-    search: String,
-    matchKey: String,
-    matchText: String
+    }
   },
   data() {
     return {}
@@ -58,22 +49,6 @@ export default {
     authorName() {
       if (this.isPodcast) return this.mediaMetadata.author || 'Unknown'
       return this.mediaMetadata.authorName || 'Unknown'
-    },
-    matchHtml() {
-      if (!this.matchText || !this.search) return ''
-      if (this.matchKey === 'subtitle') return ''
-
-      // This used to highlight the part of the search found
-      //        but with removing commas periods etc this is no longer plausible
-      const html = this.matchText
-
-      if (this.matchKey === 'episode') return `<p class="truncate">Episode: ${html}</p>`
-      if (this.matchKey === 'tags') return `<p class="truncate">Tags: ${html}</p>`
-      if (this.matchKey === 'authors') return `by ${html}`
-      if (this.matchKey === 'isbn') return `<p class="truncate">ISBN: ${html}</p>`
-      if (this.matchKey === 'asin') return `<p class="truncate">ASIN: ${html}</p>`
-      if (this.matchKey === 'series') return `<p class="truncate">Series: ${html}</p>`
-      return `${html}`
     }
   },
   methods: {},

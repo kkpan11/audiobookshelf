@@ -1,6 +1,6 @@
 <template>
   <div class="w-full h-full overflow-y-auto overflow-x-hidden px-4 py-6">
-    <tables-library-files-table expanded :files="libraryFiles" :library-item-id="libraryItem.id" :is-missing="isMissing" />
+    <tables-library-files-table expanded :library-item="libraryItem" :is-missing="isMissing" in-modal />
   </div>
 </template>
 
@@ -14,8 +14,7 @@ export default {
   },
   data() {
     return {
-      tracks: [],
-      showFullPath: false
+      tracks: []
     }
   },
   watch: {
@@ -29,9 +28,6 @@ export default {
   computed: {
     media() {
       return this.libraryItem.media || {}
-    },
-    libraryFiles() {
-      return this.libraryItem.libraryFiles || []
     },
     userToken() {
       return this.$store.getters['user/getToken']

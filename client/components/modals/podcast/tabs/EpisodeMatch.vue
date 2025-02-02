@@ -18,7 +18,7 @@
       <div v-for="(episode, index) in episodesFound" :key="index" class="w-full py-4 border-b border-white border-opacity-5 hover:bg-gray-300 hover:bg-opacity-10 cursor-pointer px-2" @click.stop="selectEpisode(episode)">
         <p v-if="episode.episode" class="font-semibold text-gray-200">#{{ episode.episode }}</p>
         <p class="break-words mb-1">{{ episode.title }}</p>
-        <p v-if="episode.subtitle" class="break-words mb-1 text-sm text-gray-300 episode-subtitle">{{ episode.subtitle }}</p>
+        <p v-if="episode.subtitle" class="mb-1 text-sm text-gray-300 line-clamp-2">{{ episode.subtitle }}</p>
         <p class="text-xs text-gray-400">Published {{ episode.publishedAt ? $dateDistanceFromNow(episode.publishedAt) : 'Unknown' }}</p>
       </div>
     </template>
@@ -105,7 +105,7 @@ export default {
       }
       const updatePayload = this.getUpdatePayload(episodeData)
       if (!Object.keys(updatePayload).length) {
-        return this.$toast.info('No updates are necessary')
+        return this.$toast.info(this.$strings.ToastNoUpdatesNecessary)
       }
       console.log('Episode update payload', updatePayload)
 
@@ -126,13 +126,13 @@ export default {
     },
     submitForm() {
       if (!this.episodeTitle || !this.episodeTitle.length) {
-        this.$toast.error('Must enter an episode title')
+        this.$toast.error(this.$strings.ToastTitleRequired)
         return
       }
       this.searchedTitle = this.episodeTitle
       this.isProcessing = true
       this.$axios
-        .$get(`/api/podcasts/${this.libraryItem.id}/search-episode?title=${this.$encodeUriPath(this.episodeTitle)}`)
+        .$get(`/api/podcasts/${this.libraryItem.id}/search-episode?title=${encodeURIComponent(this.episodeTitle)}`)
         .then((results) => {
           this.episodesFound = results.episodes.map((ep) => ep.episode)
           console.log('Episodes found', this.episodesFound)

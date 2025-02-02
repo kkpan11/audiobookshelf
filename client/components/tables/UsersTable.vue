@@ -10,7 +10,7 @@
           <th class="w-32 hidden sm:table-cell">{{ $strings.LabelCreatedAt }}</th>
           <th class="w-32"></th>
         </tr>
-        <tr v-for="user in users" :key="user.id" class="cursor-pointer" :class="user.isActive ? '' : 'bg-error bg-opacity-20'" @click="$router.push(`/config/users/${user.id}`)">
+        <tr v-for="user in users" :key="user.id" class="cursor-pointer" :class="user.isActive ? '' : '!bg-error/10'" @click="$router.push(`/config/users/${user.id}`)">
           <td>
             <div class="flex items-center">
               <widgets-online-indicator :value="!!usersOnline[user.id]" />
@@ -19,9 +19,13 @@
           </td>
           <td class="text-sm">{{ user.type }}</td>
           <td class="hidden lg:table-cell">
-            <div v-if="usersOnline[user.id]">
-              <p v-if="usersOnline[user.id].session && usersOnline[user.id].session.libraryItem" class="truncate text-xs">Listening: {{ usersOnline[user.id].session.libraryItem.media.metadata.title || '' }}</p>
-              <p v-else-if="usersOnline[user.id].mostRecent && usersOnline[user.id].mostRecent.media" class="truncate text-xs">Last: {{ usersOnline[user.id].mostRecent.media.metadata.title }}</p>
+            <div v-if="usersOnline[user.id]?.session?.displayTitle">
+              <p class="truncate text-xs">Listening: {{ usersOnline[user.id].session.displayTitle || '' }}</p>
+              <p class="truncate text-xs text-gray-300">{{ getDeviceInfoString(usersOnline[user.id].session.deviceInfo) }}</p>
+            </div>
+            <div v-else-if="user.latestSession?.displayTitle">
+              <p class="truncate text-xs">Last: {{ user.latestSession.displayTitle || '' }}</p>
+              <p class="truncate text-xs text-gray-300">{{ getDeviceInfoString(user.latestSession.deviceInfo) }}</p>
             </div>
           </td>
           <td class="text-xs font-mono hidden sm:table-cell">
@@ -38,18 +42,16 @@
             <div class="w-full flex justify-left">
               <!-- Dont show edit for non-root users -->
               <div v-if="user.type !== 'root' || userIsRoot" class="h-8 w-8 flex items-center justify-center text-white text-opacity-50 hover:text-opacity-100 cursor-pointer" @click.stop="editUser(user)">
-                <button type="button" :aria-label="$getString('ButtonUserEdit', [user.username])" class="material-icons text-base">edit</button>
+                <button type="button" :aria-label="$getString('ButtonUserEdit', [user.username])" class="material-symbols text-base">edit</button>
               </div>
-              <div v-show="user.type !== 'root'" class="h-8 w-8 flex items-center justify-center text-white text-opacity-50 hover:text-error cursor-pointer" @click.stop="deleteUserClick(user)">
-                <button type="button" :aria-label="$getString('ButtonUserDelete', [user.username])" class="material-icons text-base">delete</button>
+              <div v-show="user.type !== 'root' && user.id !== currentUserId" class="h-8 w-8 flex items-center justify-center text-white text-opacity-50 hover:text-error cursor-pointer" @click.stop="deleteUserClick(user)">
+                <button type="button" :aria-label="$getString('ButtonUserDelete', [user.username])" class="material-symbols text-base">delete</button>
               </div>
             </div>
           </td>
         </tr>
       </table>
     </div>
-
-    <modals-account-modal ref="accountModal" v-model="showAccountModal" :account="selectedAccount" />
   </div>
 </template>
 
@@ -58,8 +60,6 @@ export default {
   data() {
     return {
       users: [],
-      selectedAccount: null,
-      showAccountModal: false,
       isDeletingUser: false
     }
   },
@@ -83,6 +83,12 @@ export default {
     }
   },
   methods: {
+    getDeviceInfoString(deviceInfo) {
+      if (!deviceInfo) return ''
+      if (deviceInfo.manufacturer && deviceInfo.model) return `${deviceInfo.manufacturer} ${deviceInfo.model}`
+
+      return `${deviceInfo.osName || 'Unknown'} ${deviceInfo.osVersion || ''} ${deviceInfo.browserName || ''}`
+    },
     deleteUserClick(user) {
       if (this.isDeletingUser) return
       if (confirm(this.$getString('MessageRemoveUserWarning', [user.username]))) {
@@ -104,21 +110,17 @@ export default {
           })
       }
     },
-    clickAddUser() {
-      this.selectedAccount = null
-      this.showAccountModal = true
-    },
     editUser(user) {
-      this.selectedAccount = user
-      this.showAccountModal = true
+      this.$emit('edit', user)
     },
     loadUsers() {
       this.$axios
-        .$get('/api/users')
+        .$get('/api/users?include=latestSession')
         .then((res) => {
           this.users = res.users.sort((a, b) => {
             return a.createdAt - b.createdAt
           })
+          this.$emit('numUsers', this.users.length)
         })
         .catch((error) => {
           console.error('Failed', error)
@@ -156,10 +158,6 @@ export default {
     this.init()
   },
   beforeDestroy() {
-    if (this.$refs.accountModal) {
-      this.$refs.accountModal.close()
-    }
-
     if (this.$root.socket) {
       this.$root.socket.off('user_added', this.addUpdateUser)
       this.$root.socket.off('user_updated', this.addUpdateUser)

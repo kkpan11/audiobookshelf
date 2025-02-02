@@ -8,10 +8,9 @@
     <div class="p-4 w-full text-sm py-6 rounded-lg bg-bg shadow-lg border border-black-300 relative overflow-hidden" style="min-height: 400px; max-height: 80vh">
       <template v-if="!showImageUploader">
         <form @submit.prevent="submitForm">
-          <div class="flex">
-            <div>
+          <div class="flex flex-wrap">
+            <div class="w-full flex justify-center mb-2 md:w-auto md:mb-0 md:block">
               <covers-collection-cover :book-items="books" :width="200" :height="100 * bookCoverAspectRatio" :book-cover-aspect-ratio="bookCoverAspectRatio" />
-              <!-- <ui-btn type="button" @click="showImageUploader = true">Upload</ui-btn> -->
             </div>
             <div class="flex-grow px-4">
               <ui-text-input-with-label v-model="newCollectionName" :label="$strings.LabelName" class="mb-2" />
@@ -29,7 +28,7 @@
       <template v-else>
         <div class="flex items-center mb-3">
           <div class="hover:bg-white hover:bg-opacity-10 cursor-pointer h-11 w-11 flex items-center justify-center rounded-full" @click="showImageUploader = false">
-            <span class="material-icons text-4xl">arrow_back</span>
+            <span class="material-symbols text-4xl">arrow_back</span>
           </div>
           <p class="ml-2 text-xl mb-1">Collection Cover Image</p>
         </div>
@@ -41,7 +40,6 @@
           <ui-btn color="success">Upload</ui-btn>
         </div>
       </template>
-      <!-- <modals-upload-image-modal v-model="showUploadImageModal" entity="collection" :entity-id="collection.id" /> -->
     </div>
   </modals-modal>
 </template>
@@ -108,7 +106,7 @@ export default {
           .catch((error) => {
             console.error('Failed to remove collection', error)
             this.processing = false
-            this.$toast.error(this.$strings.ToastCollectionRemoveFailed)
+            this.$toast.error(this.$strings.ToastRemoveFailed)
           })
       }
     },
@@ -117,7 +115,7 @@ export default {
         return
       }
       if (!this.newCollectionName) {
-        return this.$toast.error('Collection must have a name')
+        return this.$toast.error(this.$strings.ToastNameRequired)
       }
 
       this.processing = true
@@ -137,7 +135,7 @@ export default {
         .catch((error) => {
           console.error('Failed to update collection', error)
           this.processing = false
-          this.$toast.error(this.$strings.ToastCollectionUpdateFailed)
+          this.$toast.error(this.$strings.ToastFailedToUpdate)
         })
     }
   },

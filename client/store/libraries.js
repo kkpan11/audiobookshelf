@@ -11,12 +11,13 @@ export const state = () => ({
   filterData: null,
   numUserPlaylists: 0,
   collections: [],
-  userPlaylists: []
+  userPlaylists: [],
+  ereaderDevices: []
 })
 
 export const getters = {
-  getCurrentLibrary: state => {
-    return state.libraries.find(lib => lib.id === state.currentLibraryId)
+  getCurrentLibrary: (state) => {
+    return state.libraries.find((lib) => lib.id === state.currentLibraryId)
   },
   getCurrentLibraryName: (state, getters) => {
     var currentLibrary = getters.getCurrentLibrary
@@ -27,11 +28,11 @@ export const getters = {
     if (!getters.getCurrentLibrary) return null
     return getters.getCurrentLibrary.mediaType
   },
-  getSortedLibraries: state => () => {
-    return state.libraries.map(lib => ({ ...lib })).sort((a, b) => a.displayOrder - b.displayOrder)
+  getSortedLibraries: (state) => () => {
+    return state.libraries.map((lib) => ({ ...lib })).sort((a, b) => a.displayOrder - b.displayOrder)
   },
-  getLibraryProvider: state => libraryId => {
-    var library = state.libraries.find(l => l.id === libraryId)
+  getLibraryProvider: (state) => (libraryId) => {
+    var library = state.libraries.find((l) => l.id === libraryId)
     if (!library) return null
     return library.provider
   },
@@ -56,11 +57,17 @@ export const getters = {
     if (!getters.getCurrentLibrarySettings || isNaN(getters.getCurrentLibrarySettings.coverAspectRatio)) return 1
     return getters.getCurrentLibrarySettings.coverAspectRatio === Constants.BookCoverAspectRatio.STANDARD ? 1.6 : 1
   },
-  getCollection: state => id => {
-    return state.collections.find(c => c.id === id)
+  getLibraryIsAudiobooksOnly: (state, getters) => {
+    return !!getters.getCurrentLibrarySettings?.audiobooksOnly
   },
-  getPlaylist: state => id => {
-    return state.userPlaylists.find(p => p.id === id)
+  getLibraryEpubsAllowScriptedContent: (state, getters) => {
+    return !!getters.getCurrentLibrarySettings?.epubsAllowScriptedContent
+  },
+  getCollection: (state) => (id) => {
+    return state.collections.find((c) => c.id === id)
+  },
+  getPlaylist: (state) => (id) => {
+    return state.userPlaylists.find((p) => p.id === id)
   }
 }
 
@@ -71,18 +78,17 @@ export const actions = {
   loadFolders({ state, commit }) {
     if (state.folders.length) {
       const lastCheck = Date.now() - state.folderLastUpdate
-      if (lastCheck < 1000 * 5) { // 5 seconds
+      if (lastCheck < 1000 * 5) {
+        // 5 seconds
         // Folders up to date
         return state.folders
       }
     }
-    console.log('Loading folders')
     commit('setFoldersLastUpdate')
 
     return this.$axios
       .$get('/api/filesystem')
       .then((res) => {
-        console.log('Settings folders', res)
         commit('setFolders', res.directories)
         return res.directories
       })
@@ -111,19 +117,23 @@ export const actions = {
         const library = data.library
         const filterData = data.filterdata
         const issues = data.issues || 0
+        const customMetadataProviders = data.customMetadataProviders || []
         const numUserPlaylists = data.numUserPlaylists
 
         dispatch('user/checkUpdateLibrarySortFilter', library.mediaType, { root: true })
+
+        if (libraryChanging) {
+          commit('setCollections', [])
+          commit('setUserPlaylists', [])
+        }
 
         commit('addUpdate', library)
         commit('setLibraryIssues', issues)
         commit('setLibraryFilterData', filterData)
         commit('setNumUserPlaylists', numUserPlaylists)
+        commit('scanners/setCustomMetadataProviders', customMetadataProviders, { root: true })
+
         commit('setCurrentLibrary', libraryId)
-        if (libraryChanging) {
-          commit('setCollections', [])
-          commit('setUserPlaylists', [])
-        }
         return data
       })
       .catch((error) => {
@@ -156,22 +166,6 @@ export const actions = {
         commit('set', [])
       })
     return true
-  },
-  loadLibraryFilterData({ state, commit, rootState }) {
-    if (!rootState.user || !rootState.user.user) {
-      console.error('libraries/loadLibraryFilterData - User not set')
-      return false
-    }
-
-    this.$axios
-      .$get(`/api/libraries/${state.currentLibraryId}/filterdata`)
-      .then((data) => {
-        commit('setLibraryFilterData', data)
-      })
-      .catch((error) => {
-        console.error('Failed', error)
-        commit('setLibraryFilterData', null)
-      })
   }
 }
 
@@ -198,7 +192,7 @@ export const mutations = {
     })
   },
   addUpdate(state, library) {
-    var index = state.libraries.findIndex(a => a.id === library.id)
+    var index = state.libraries.findIndex((a) => a.id === library.id)
     if (index >= 0) {
       state.libraries.splice(index, 1, library)
     } else {
@@ -210,19 +204,19 @@ export const mutations = {
     })
   },
   remove(state, library) {
-    state.libraries = state.libraries.filter(a => a.id !== library.id)
+    state.libraries = state.libraries.filter((a) => a.id !== library.id)
 
     state.listeners.forEach((listener) => {
       listener.meth()
     })
   },
   addListener(state, listener) {
-    var index = state.listeners.findIndex(l => l.id === listener.id)
+    var index = state.listeners.findIndex((l) => l.id === listener.id)
     if (index >= 0) state.listeners.splice(index, 1, listener)
     else state.listeners.push(listener)
   },
   removeListener(state, listenerId) {
-    state.listeners = state.listeners.filter(l => l.id !== listenerId)
+    state.listeners = state.listeners.filter((l) => l.id !== listenerId)
   },
   setLibraryFilterData(state, filterData) {
     state.filterData = filterData
@@ -230,49 +224,56 @@ export const mutations = {
   setNumUserPlaylists(state, numUserPlaylists) {
     state.numUserPlaylists = numUserPlaylists
   },
+  removeSeriesFromFilterData(state, seriesId) {
+    if (!seriesId || !state.filterData) return
+    state.filterData.series = state.filterData.series.filter((se) => se.id !== seriesId)
+  },
   updateFilterDataWithItem(state, libraryItem) {
     if (!libraryItem || !state.filterData) return
     if (state.currentLibraryId !== libraryItem.libraryId) return
     /*
-    var data = {
+    structure of filterData:
+    {
       authors: [],
       genres: [],
       tags: [],
       series: [],
       narrators: [],
-      languages: []
+      languages: [],
+      publishers: [],
+      publishedDecades: []
     }
     */
-    var mediaMetadata = libraryItem.media.metadata
+    const mediaMetadata = libraryItem.media.metadata
 
     // Add/update book authors
-    if (mediaMetadata.authors && mediaMetadata.authors.length) {
+    if (mediaMetadata.authors?.length) {
       mediaMetadata.authors.forEach((author) => {
-        var indexOf = state.filterData.authors.findIndex(au => au.id === author.id)
+        const indexOf = state.filterData.authors.findIndex((au) => au.id === author.id)
         if (indexOf >= 0) {
           state.filterData.authors.splice(indexOf, 1, author)
         } else {
           state.filterData.authors.push(author)
-          state.filterData.authors.sort((a, b) => (a.name || '').localeCompare((b.name || '')))
+          state.filterData.authors.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
         }
       })
     }
 
     // Add/update series
-    if (mediaMetadata.series && mediaMetadata.series.length) {
+    if (mediaMetadata.series?.length) {
       mediaMetadata.series.forEach((series) => {
-        var indexOf = state.filterData.series.findIndex(se => se.id === series.id)
+        const indexOf = state.filterData.series.findIndex((se) => se.id === series.id)
         if (indexOf >= 0) {
           state.filterData.series.splice(indexOf, 1, { id: series.id, name: series.name })
         } else {
           state.filterData.series.push({ id: series.id, name: series.name })
-          state.filterData.series.sort((a, b) => (a.name || '').localeCompare((b.name || '')))
+          state.filterData.series.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
         }
       })
     }
 
     // Add genres
-    if (mediaMetadata.genres && mediaMetadata.genres.length) {
+    if (mediaMetadata.genres?.length) {
       mediaMetadata.genres.forEach((genre) => {
         if (!state.filterData.genres.includes(genre)) {
           state.filterData.genres.push(genre)
@@ -282,7 +283,7 @@ export const mutations = {
     }
 
     // Add tags
-    if (libraryItem.media.tags && libraryItem.media.tags.length) {
+    if (libraryItem.media.tags?.length) {
       libraryItem.media.tags.forEach((tag) => {
         if (!state.filterData.tags.includes(tag)) {
           state.filterData.tags.push(tag)
@@ -292,7 +293,7 @@ export const mutations = {
     }
 
     // Add narrators
-    if (mediaMetadata.narrators && mediaMetadata.narrators.length) {
+    if (mediaMetadata.narrators?.length) {
       mediaMetadata.narrators.forEach((narrator) => {
         if (!state.filterData.narrators.includes(narrator)) {
           state.filterData.narrators.push(narrator)
@@ -301,19 +302,33 @@ export const mutations = {
       })
     }
 
-    // Add language
-    if (mediaMetadata.language) {
-      if (!state.filterData.languages.includes(mediaMetadata.language)) {
-        state.filterData.languages.push(mediaMetadata.language)
-        state.filterData.languages.sort((a, b) => a.localeCompare(b))
+    // Add publishers
+    if (mediaMetadata.publisher && !state.filterData.publishers.includes(mediaMetadata.publisher)) {
+      state.filterData.publishers.push(mediaMetadata.publisher)
+      state.filterData.publishers.sort((a, b) => a.localeCompare(b))
+    }
+
+    // Add publishedDecades
+    if (mediaMetadata.publishedYear && !isNaN(mediaMetadata.publishedYear)) {
+      const publishedYear = parseInt(mediaMetadata.publishedYear, 10)
+      const decade = (Math.floor(publishedYear / 10) * 10).toString()
+      if (!state.filterData.publishedDecades.includes(decade)) {
+        state.filterData.publishedDecades.push(decade)
+        state.filterData.publishedDecades.sort((a, b) => a - b)
       }
+    }
+
+    // Add language
+    if (mediaMetadata.language && !state.filterData.languages.includes(mediaMetadata.language)) {
+      state.filterData.languages.push(mediaMetadata.language)
+      state.filterData.languages.sort((a, b) => a.localeCompare(b))
     }
   },
   setCollections(state, collections) {
     state.collections = collections
   },
   addUpdateCollection(state, collection) {
-    var index = state.collections.findIndex(c => c.id === collection.id)
+    var index = state.collections.findIndex((c) => c.id === collection.id)
     if (index >= 0) {
       state.collections.splice(index, 1, collection)
     } else {
@@ -321,14 +336,14 @@ export const mutations = {
     }
   },
   removeCollection(state, collection) {
-    state.collections = state.collections.filter(c => c.id !== collection.id)
+    state.collections = state.collections.filter((c) => c.id !== collection.id)
   },
   setUserPlaylists(state, playlists) {
     state.userPlaylists = playlists
     state.numUserPlaylists = playlists.length
   },
   addUpdateUserPlaylist(state, playlist) {
-    const index = state.userPlaylists.findIndex(p => p.id === playlist.id)
+    const index = state.userPlaylists.findIndex((p) => p.id === playlist.id)
     if (index >= 0) {
       state.userPlaylists.splice(index, 1, playlist)
     } else {
@@ -337,7 +352,10 @@ export const mutations = {
     }
   },
   removeUserPlaylist(state, playlist) {
-    state.userPlaylists = state.userPlaylists.filter(p => p.id !== playlist.id)
+    state.userPlaylists = state.userPlaylists.filter((p) => p.id !== playlist.id)
     state.numUserPlaylists = state.userPlaylists.length
+  },
+  setEReaderDevices(state, ereaderDevices) {
+    state.ereaderDevices = ereaderDevices
   }
 }

@@ -13,10 +13,10 @@
           <div class="flex-grow" />
           <p class="text-sm md:text-base">{{ book.publishedYear }}</p>
         </div>
-        <p v-if="book.author" class="text-gray-300 text-xs md:text-sm">by {{ book.author }}</p>
-        <p v-if="book.narrator" class="text-gray-400 text-xs">Narrated by {{ book.narrator }}</p>
-        <p v-if="book.duration" class="text-gray-400 text-xs">Runtime: {{ $elapsedPrettyExtended(book.duration * 60) }}</p>
-        <div v-if="book.series && book.series.length" class="flex py-1 -mx-1">
+        <p v-if="book.author" class="text-gray-300 text-xs md:text-sm">{{ $getString('LabelByAuthor', [book.author]) }}</p>
+        <p v-if="book.narrator" class="text-gray-400 text-xs">{{ $strings.LabelNarrators }}: {{ book.narrator }}</p>
+        <p v-if="book.duration" class="text-gray-400 text-xs">{{ $strings.LabelDuration }}: {{ $elapsedPrettyExtended(bookDuration, false) }} {{ bookDurationComparison }}</p>
+        <div v-if="book.series?.length" class="flex py-1 -mx-1">
           <div v-for="(series, index) in book.series" :key="index" class="bg-white bg-opacity-10 rounded-full px-1 py-0.5 mx-1">
             <p class="leading-3 text-xs text-gray-400">
               {{ series.series }}<span v-if="series.sequence">&nbsp;#{{ series.sequence }}</span>
@@ -24,16 +24,14 @@
           </div>
         </div>
         <div class="w-full max-h-12 overflow-hidden">
-          <p class="text-gray-500 text-xs">{{ book.description }}</p>
+          <p class="text-gray-500 text-xs">{{ book.descriptionPlain }}</p>
         </div>
       </div>
       <div v-else class="px-4 flex-grow">
         <h1>
-          <div class="flex items-center">
-            {{ book.title }}<widgets-explicit-indicator :explicit="book.explicit" />
-          </div>
+          <div class="flex items-center">{{ book.title }}<widgets-explicit-indicator v-if="book.explicit" /></div>
         </h1>
-        <p class="text-base text-gray-300 whitespace-nowrap truncate">by {{ book.author }}</p>
+        <p class="text-base text-gray-300 whitespace-nowrap truncate">{{ $getString('LabelByAuthor', [book.author]) }}</p>
         <p v-if="book.genres" class="text-xs text-gray-400 leading-5">{{ book.genres.join(', ') }}</p>
         <p class="text-xs text-gray-400 leading-5">{{ book.trackCount }} Episodes</p>
       </div>
@@ -56,7 +54,8 @@ export default {
       default: () => {}
     },
     isPodcast: Boolean,
-    bookCoverAspectRatio: Number
+    bookCoverAspectRatio: Number,
+    currentBookDuration: Number
   },
   data() {
     return {
@@ -65,12 +64,27 @@ export default {
   },
   computed: {
     bookCovers() {
-      return this.book.covers ? this.book.covers || [] : []
+      return this.book.covers || []
+    },
+    bookDuration() {
+      return (this.book.duration || 0) * 60
+    },
+    bookDurationComparison() {
+      if (!this.book.duration || !this.currentBookDuration) return ''
+      const currentBookDurationMinutes = Math.floor(this.currentBookDuration / 60)
+      let differenceInMinutes = currentBookDurationMinutes - this.book.duration
+      if (differenceInMinutes < 0) {
+        differenceInMinutes = Math.abs(differenceInMinutes)
+        return this.$getString('LabelDurationComparisonLonger', [this.$elapsedPrettyExtended(differenceInMinutes * 60, false, false)])
+      } else if (differenceInMinutes > 0) {
+        return this.$getString('LabelDurationComparisonShorter', [this.$elapsedPrettyExtended(differenceInMinutes * 60, false, false)])
+      }
+      return this.$strings.LabelDurationComparisonExactMatch
     }
   },
   methods: {
     selectMatch() {
-      var book = { ...this.book }
+      const book = { ...this.book }
       book.cover = this.selectedCover
       this.$emit('select', book)
     },

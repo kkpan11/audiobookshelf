@@ -3,8 +3,8 @@
     <app-config-side-nav :is-open.sync="sideDrawerOpen" />
     <div class="configContent" :class="`page-${currentPage}`">
       <div v-show="isMobilePortrait" class="w-full pb-4 px-2 flex border-b border-white border-opacity-10 mb-2 cursor-pointer" @click.stop.prevent="toggleShowMore">
-        <span class="material-icons text-2xl cursor-pointer">arrow_forward</span>
-        <p class="pl-3 capitalize">{{ $strings.HeaderSettings }}</p>
+        <span class="material-symbols text-2xl cursor-pointer">arrow_forward</span>
+        <p class="pl-3 capitalize">{{ currentPage }}</p>
       </div>
       <nuxt-child />
     </div>
@@ -52,9 +52,11 @@ export default {
         else if (pageName === 'notifications') return this.$strings.HeaderNotifications
         else if (pageName === 'sessions') return this.$strings.HeaderListeningSessions
         else if (pageName === 'stats') return this.$strings.HeaderYourStats
-        else if (pageName === 'library-stats') return this.$strings.HeaderLibraryStats
         else if (pageName === 'users') return this.$strings.HeaderUsers
         else if (pageName === 'item-metadata-utils') return this.$strings.HeaderItemMetadataUtils
+        else if (pageName === 'rss-feeds') return this.$strings.HeaderRSSFeeds
+        else if (pageName === 'email') return this.$strings.HeaderEmail
+        else if (pageName === 'authentication') return this.$strings.HeaderAuthentication
       }
       return this.$strings.HeaderSettings
     }
@@ -79,14 +81,6 @@ export default {
   width: 900px;
   max-width: calc(100% - 176px);
 }
-.configContent.page-library-stats {
-  width: 1200px;
-}
-@media (max-width: 1550px) {
-  .configContent.page-library-stats {
-    margin-left: 176px;
-  }
-}
 @media (max-width: 1240px) {
   .configContent {
     margin-left: 176px;
@@ -97,9 +91,6 @@ export default {
     margin-left: 0px;
     width: 100%;
     max-width: 100%;
-  }
-  .configContent.page-library-stats {
-    margin-left: 0px;
   }
 }
 </style>
