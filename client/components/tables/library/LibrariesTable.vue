@@ -11,10 +11,6 @@
       <ui-btn @click="clickAddLibrary">{{ $strings.ButtonAddYourFirstLibrary }}</ui-btn>
     </div>
 
-    <p v-if="libraries.length" class="text-xs mt-4 text-gray-200">
-      *<strong>{{ $strings.ButtonForceReScan }}</strong> {{ $strings.MessageForceReScanDescription }}
-    </p>
-
     <p v-if="libraries.length && libraries.some((li) => li.mediaType === 'book')" class="text-xs mt-4 text-gray-200">
       **<strong>{{ $strings.ButtonMatchBooks }}</strong> {{ $strings.MessageMatchBooksDescription }}
     </p>
@@ -46,13 +42,10 @@ export default {
       return this.$store.getters['libraries/getCurrentLibrary']
     },
     currentLibraryId() {
-      return this.currentLibrary ? this.currentLibrary.id : null
+      return this.currentLibrary?.id || null
     },
     libraries() {
       return this.$store.getters['libraries/getSortedLibraries']()
-    },
-    libraryScans() {
-      return this.$store.state.scanners.libraryScans
     }
   },
   methods: {
@@ -83,8 +76,7 @@ export default {
       var newOrder = libraryOrderData.map((lib) => lib.id).join(',')
       if (currOrder !== newOrder) {
         this.$axios.$post('/api/libraries/order', libraryOrderData).then((response) => {
-          if (response.libraries && response.libraries.length) {
-            this.$toast.success('Library order saved', { timeout: 1500 })
+          if (response.libraries?.length) {
             this.$store.commit('libraries/set', response.libraries)
           }
         })

@@ -1,31 +1,31 @@
 <template>
   <div class="w-full">
-    <p class="px-1 text-sm font-semibold" :class="disabled ? 'text-gray-400' : ''">{{ label }}</p>
+    <label :for="identifier" class="px-1 text-sm font-semibold" :class="disabled ? 'text-gray-400' : ''">{{ label }}</label>
     <div ref="wrapper" class="relative">
       <form @submit.prevent="submitForm">
-        <div ref="inputWrapper" style="min-height: 36px" class="flex-wrap relative w-full shadow-sm flex items-center border border-gray-600 rounded px-2 py-0.5" :class="wrapperClass" @click.stop.prevent="clickWrapper" @mouseup.stop.prevent @mousedown.prevent>
-          <div v-for="item in selected" :key="item.id" class="rounded-full px-2 py-0.5 m-0.5 text-xs bg-bg flex flex-nowrap whitespace-nowrap items-center justify-center relative min-w-12">
-            <div v-if="!disabled" class="w-full h-full rounded-full absolute top-0 left-0 opacity-0 hover:opacity-100 px-1 bg-bg bg-opacity-75 flex items-center justify-end cursor-pointer">
-              <span v-if="showEdit" class="material-icons text-base text-white hover:text-warning mr-1" @click.stop="editItem(item)">edit</span>
-              <span class="material-icons text-white hover:text-error" style="font-size: 1.1rem" @click.stop="removeItem(item.id)">close</span>
+        <div ref="inputWrapper" role="list" style="min-height: 36px" class="flex-wrap relative w-full shadow-sm flex items-center border border-gray-600 rounded px-2 py-0.5" :class="wrapperClass" @click.stop.prevent="clickWrapper" @mouseup.stop.prevent @mousedown.prevent>
+          <div v-for="item in selected" :key="item.id" role="listitem" class="rounded-full px-2 py-0.5 m-0.5 text-xs bg-bg flex flex-nowrap whitespace-nowrap items-center justify-center relative min-w-12">
+            <div v-if="!disabled" class="w-full h-full rounded-full absolute top-0 left-0 opacity-0 hover:opacity-100 px-1 bg-bg bg-opacity-75 flex items-center justify-end cursor-pointer" :class="{ 'opacity-100': inputFocused }">
+              <button v-if="showEdit" type="button" :aria-label="$strings.ButtonEdit" class="material-symbols text-base text-white hover:text-warning focus:text-warning mr-1" @click.stop="editItem(item)" @keydown.enter.stop.prevent="editItem(item)" @focus="setInputFocused(true)" @blur="setInputFocused(false)" tabindex="0">edit</button>
+              <button type="button" :aria-label="$strings.ButtonRemove" class="material-symbols text-white hover:text-error focus:text-error" style="font-size: 1.1rem" @click.stop="removeItem(item.id)" @keydown.enter.stop="removeItem(item.id)" @focus="setInputFocused(true)" @blur="setInputFocused(false)" tabindex="0">close</button>
             </div>
             {{ item[textKey] }}
           </div>
           <div v-if="showEdit && !disabled" class="rounded-full cursor-pointer w-6 h-6 mx-0.5 bg-bg flex items-center justify-center">
-            <span class="material-icons text-white hover:text-success pt-px pr-px" style="font-size: 1.1rem" @click.stop="addItem">add</span>
+            <button type="button" :aria-label="$strings.ButtonAdd" class="material-symbols text-white hover:text-success focus:text-success pt-px pr-px" style="font-size: 1.1rem" @click.stop="addItem" @keydown.enter.stop="addItem" tabindex="0">add</button>
           </div>
-          <input v-show="!readonly" ref="input" v-model="textInput" :disabled="disabled" style="min-width: 40px; width: 40px" class="h-full bg-primary focus:outline-none px-1" @keydown="keydownInput" @focus="inputFocus" @blur="inputBlur" />
+          <input v-show="!readonly" v-model="textInput" ref="input" :id="identifier" :disabled="disabled" class="h-full bg-primary focus:outline-none px-1 w-6" @keydown="keydownInput" @focus="inputFocus" @blur="inputBlur" @paste="inputPaste" />
         </div>
       </form>
 
       <ul ref="menu" v-show="showMenu" class="absolute z-60 w-full bg-bg border border-black-200 shadow-lg max-h-56 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm" role="listbox" aria-labelledby="listbox-label">
         <template v-for="item in itemsToShow">
-          <li :key="item.id" class="text-gray-50 select-none relative py-2 pr-9 cursor-pointer hover:bg-black-400" role="option" @click="clickedOption($event, item)" @mouseup.stop.prevent @mousedown.prevent>
+          <li :key="item.id" class="text-gray-50 select-none relative py-2 pr-9 cursor-pointer hover:bg-black-400" :class="isMenuItemSelected(item) ? 'text-yellow-300' : ''" role="option" @click="clickedOption($event, item)" @mouseup.stop.prevent @mousedown.prevent>
             <div class="flex items-center">
               <span class="font-normal ml-3 block truncate">{{ item.name }}</span>
             </div>
             <span v-if="getIsSelected(item.id)" class="text-yellow-400 absolute inset-y-0 right-0 flex items-center pr-4">
-              <span class="material-icons text-xl">checkmark</span>
+              <span class="material-symbols text-xl">check</span>
             </span>
           </li>
         </template>
@@ -40,13 +40,16 @@
 </template>
 
 <script>
+import menuKeyboardNavigationMixin from '@/mixins/menuKeyboardNavigation'
+
 export default {
+  mixins: [menuKeyboardNavigationMixin],
   props: {
     value: {
       type: Array,
       default: () => []
     },
-    endpoint: String,
+    filterKey: String,
     label: String,
     disabled: Boolean,
     readonly: Boolean,
@@ -60,9 +63,9 @@ export default {
     return {
       textInput: null,
       currentSearch: null,
-      searching: false,
       typingTimeout: null,
       isFocused: false,
+      inputFocused: false,
       menu: null,
       items: []
     }
@@ -97,6 +100,12 @@ export default {
     },
     itemsToShow() {
       return this.items
+    },
+    filterData() {
+      return this.$store.state.libraries.filterData || {}
+    },
+    identifier() {
+      return Math.random().toString(36).substring(2)
     }
   },
   methods: {
@@ -109,22 +118,22 @@ export default {
     getIsSelected(itemValue) {
       return !!this.selected.find((i) => i.id === itemValue)
     },
-    async search() {
-      if (this.searching) return
+    setInputFocused(focused) {
+      this.inputFocused = focused
+    },
+    search() {
+      if (!this.textInput) return
       this.currentSearch = this.textInput
-      this.searching = true
-      const results = await this.$axios
-        .$get(`/api/${this.endpoint}?q=${this.currentSearch}&limit=15&token=${this.userToken}`)
-        .then((res) => res.results || res)
-        .catch((error) => {
-          console.error('Failed to get search results', error)
-          return []
-        })
+      const dataToSearch = this.filterData[this.filterKey] || []
+
+      const results = dataToSearch.filter((au) => {
+        return au.name.toLowerCase().includes(this.currentSearch.toLowerCase().trim())
+      })
 
       this.items = results || []
-      this.searching = false
     },
-    keydownInput() {
+    keydownInput(event) {
+      this.menuNavigationHandler(event)
       clearTimeout(this.typingTimeout)
       this.typingTimeout = setTimeout(() => {
         this.search()
@@ -168,6 +177,34 @@ export default {
       this.menu.style.left = boundingBox.x + 'px'
       this.menu.style.width = boundingBox.width + 'px'
     },
+    inputPaste(evt) {
+      setTimeout(() => {
+        const pastedText = evt.target?.value || ''
+        console.log('Pasted text=', pastedText)
+        const pastedItems = [
+          ...new Set(
+            pastedText
+              .split(';')
+              .map((i) => i.trim())
+              .filter((i) => i)
+          )
+        ]
+
+        // Filter out items already selected
+        const itemsToAdd = pastedItems.filter((i) => !this.selected.some((_i) => _i[this.textKey].toLowerCase() === i.toLowerCase()))
+        if (pastedItems.length && !itemsToAdd.length) {
+          this.textInput = null
+          this.currentSearch = null
+        } else {
+          for (const [index, itemToAdd] of itemsToAdd.entries()) {
+            this.insertNewItem({
+              id: `new-${Date.now()}-${index}`,
+              name: itemToAdd
+            })
+          }
+        }
+      }, 10)
+    },
     inputFocus() {
       if (!this.menu) {
         this.unmountMountMenu()
@@ -177,6 +214,10 @@ export default {
     },
     inputBlur() {
       if (!this.isFocused) return
+
+      if (typeof this.textInput === 'string') {
+        this.textInput = this.textInput.trim()
+      }
 
       setTimeout(() => {
         if (document.activeElement === this.$refs.input) {
@@ -194,6 +235,11 @@ export default {
     },
     forceBlur() {
       this.isFocused = false
+
+      if (typeof this.textInput === 'string') {
+        this.textInput = this.textInput.trim()
+      }
+
       if (this.textInput) this.submitForm()
       if (this.$refs.input) this.$refs.input.blur()
     },
@@ -202,7 +248,10 @@ export default {
         e.stopPropagation()
         e.preventDefault()
       }
-      if (this.$refs.input) this.$refs.input.focus()
+      if (this.$refs.input) {
+        this.$refs.input.style.width = '24px'
+        this.$refs.input.focus()
+      }
 
       let newSelected = null
       if (this.getIsSelected(item.id)) {
@@ -218,6 +267,7 @@ export default {
       }
       this.textInput = null
       this.currentSearch = null
+      this.selectedMenuItemIndex = null
 
       this.$emit('input', newSelected)
       this.$nextTick(() => {
@@ -245,16 +295,15 @@ export default {
       this.$emit('newItem', item)
       this.textInput = null
       this.currentSearch = null
-      this.$nextTick(() => {
-        this.blur()
-      })
+      this.selectedMenuItemIndex = null
     },
     submitForm() {
-      if (!this.textInput) return
+      if (!this.textInput || !this.textInput.trim?.()) return
 
-      const cleaned = this.textInput.trim()
+      this.textInput = this.textInput.trim()
+
       const matchesItem = this.items.find((i) => {
-        return i.name === cleaned
+        return i.name === this.textInput
       })
 
       if (matchesItem) {
@@ -265,6 +314,7 @@ export default {
           name: this.textInput
         })
       }
+      if (this.$refs.input) this.$refs.input.style.width = '24px'
     },
     scroll() {
       this.recalcMenuPos()

@@ -6,7 +6,7 @@
       </div>
     </template>
 
-    <div ref="container" class="w-full rounded-lg bg-primary box-shadow-md overflow-y-auto overflow-x-hidden" style="max-height: 80vh">
+    <div ref="container" class="w-full rounded-lg bg-bg box-shadow-md overflow-y-auto overflow-x-hidden" style="max-height: 80vh">
       <div v-if="show" class="w-full h-full">
         <div class="py-4 px-4">
           <h1 v-if="!showBatchCollectionModal" class="text-2xl">{{ $strings.LabelAddToCollection }}</h1>
@@ -19,9 +19,20 @@
             </template>
           </transition-group>
         </div>
-        <div v-if="!collections.length" class="flex h-32 items-center justify-center">
-          <p class="text-xl">{{ $strings.MessageNoCollections }}</p>
+        <div v-if="!collections.length" class="flex h-32 items-center justify-center text-center px-2">
+          <div>
+            <p class="text-xl mb-2">{{ $strings.MessageNoCollections }}</p>
+            <div class="text-sm flex items-center justify-center text-gray-200">
+              <p>{{ $strings.MessageBookshelfNoCollectionsHelp }}</p>
+              <ui-tooltip :text="$strings.LabelClickForMoreInfo" class="inline-flex ml-2">
+                <a href="https://www.audiobookshelf.org/guides/collections" target="_blank" class="inline-flex">
+                  <span class="material-symbols text-xl w-5 text-gray-200">help_outline</span>
+                </a>
+              </ui-tooltip>
+            </div>
+          </div>
         </div>
+
         <div class="w-full h-px bg-white bg-opacity-10" />
         <form @submit.prevent="submitCreateCollection">
           <div class="flex px-4 py-2 items-center text-center border-b border-white border-opacity-10 text-white text-opacity-80">
@@ -122,7 +133,7 @@ export default {
         })
         .catch((error) => {
           console.error('Failed to get collections', error)
-          this.$toast.error('Failed to load collections')
+          this.$toast.error(this.$strings.ToastFailedToLoadData)
         })
         .finally(() => {
           this.processing = false
@@ -138,12 +149,11 @@ export default {
           .$post(`/api/collections/${collection.id}/batch/remove`, { books: this.selectedBookIds })
           .then((updatedCollection) => {
             console.log(`Books removed from collection`, updatedCollection)
-            this.$toast.success(this.$strings.ToastCollectionItemsRemoveSuccess)
             this.processing = false
           })
           .catch((error) => {
             console.error('Failed to remove books from collection', error)
-            this.$toast.error(this.$strings.ToastCollectionItemsRemoveFailed)
+            this.$toast.error(this.$strings.ToastRemoveFailed)
             this.processing = false
           })
       } else {
@@ -152,12 +162,11 @@ export default {
           .$delete(`/api/collections/${collection.id}/book/${this.selectedLibraryItemId}`)
           .then((updatedCollection) => {
             console.log(`Book removed from collection`, updatedCollection)
-            this.$toast.success(this.$strings.ToastCollectionItemsRemoveSuccess)
             this.processing = false
           })
           .catch((error) => {
             console.error('Failed to remove book from collection', error)
-            this.$toast.error(this.$strings.ToastCollectionItemsRemoveFailed)
+            this.$toast.error(this.$strings.ToastRemoveFailed)
             this.processing = false
           })
       }
@@ -167,17 +176,16 @@ export default {
       this.processing = true
 
       if (this.showBatchCollectionModal) {
-        // BATCH Remove books
+        // BATCH Add books
         this.$axios
           .$post(`/api/collections/${collection.id}/batch/add`, { books: this.selectedBookIds })
           .then((updatedCollection) => {
             console.log(`Books added to collection`, updatedCollection)
-            this.$toast.success('Books added to collection')
             this.processing = false
           })
           .catch((error) => {
             console.error('Failed to add books to collection', error)
-            this.$toast.error('Failed to add books to collection')
+            this.$toast.error(this.$strings.ToastCollectionItemsAddFailed)
             this.processing = false
           })
       } else {
@@ -187,12 +195,11 @@ export default {
           .$post(`/api/collections/${collection.id}/book`, { id: this.selectedLibraryItemId })
           .then((updatedCollection) => {
             console.log(`Book added to collection`, updatedCollection)
-            this.$toast.success('Book added to collection')
             this.processing = false
           })
           .catch((error) => {
             console.error('Failed to add book to collection', error)
-            this.$toast.error('Failed to add book to collection')
+            this.$toast.error(this.$strings.ToastCollectionItemsAddFailed)
             this.processing = false
           })
       }
@@ -214,14 +221,13 @@ export default {
         .$post('/api/collections', newCollection)
         .then((data) => {
           console.log('New Collection Created', data)
-          this.$toast.success(`Collection "${data.name}" created`)
           this.processing = false
           this.newCollectionName = ''
         })
         .catch((error) => {
           console.error('Failed to create collection', error)
           var errMsg = error.response ? error.response.data || '' : ''
-          this.$toast.error(`Failed to create collection: ${errMsg}`)
+          this.$toast.error(this.$strings.ToastCollectionCreateFailed + ': ' + errMsg)
           this.processing = false
         })
     }

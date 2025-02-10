@@ -70,7 +70,10 @@ export default {
   methods: {
     editItem(playlistItem) {
       if (playlistItem.episode) {
-        this.$store.commit('globals/setSelectedEpisode', playlist.episode)
+        const episodeIds = this.items.map((pi) => pi.episodeId)
+        this.$store.commit('setEpisodeTableEpisodeIds', episodeIds)
+        this.$store.commit('setSelectedLibraryItem', playlistItem.libraryItem)
+        this.$store.commit('globals/setSelectedEpisode', playlistItem.episode)
         this.$store.commit('globals/setShowEditPodcastEpisodeModal', true)
       } else {
         const itemIds = this.items.map((i) => i.libraryItemId)
@@ -89,7 +92,7 @@ export default {
         })
         .catch((error) => {
           console.error('Failed to update playlist', error)
-          this.$toast.error('Failed to save playlist items order')
+          this.$toast.error(this.$strings.ToastFailedToUpdate)
         })
     },
     init() {

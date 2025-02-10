@@ -2,7 +2,7 @@
   <div ref="page" id="page-wrapper" class="page px-6 pt-6 pb-52 overflow-y-auto" :class="streamLibraryItem ? 'streaming' : ''">
     <div class="border border-white border-opacity-10 max-w-7xl mx-auto mb-10 mt-5">
       <div class="flex items-center px-4 py-4 cursor-pointer" @click="openMapOptions = !openMapOptions" @mousedown.prevent @mouseup.prevent>
-        <span class="material-icons text-2xl">{{ openMapOptions ? 'expand_less' : 'expand_more' }}</span>
+        <span class="material-symbols text-2xl">{{ openMapOptions ? 'expand_less' : 'expand_more' }}</span>
 
         <p class="ml-4 text-gray-200 text-lg">{{ $strings.HeaderMapDetails }}</p>
 
@@ -20,44 +20,44 @@
       <div class="overflow-hidden">
         <transition name="slide">
           <div v-if="openMapOptions" class="flex flex-wrap">
-            <div v-if="!isPodcastLibrary && !isMapAppend" class="flex items-center px-4 w-1/2">
+            <div v-if="!isPodcastLibrary && !isMapAppend" class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.subtitle" />
-              <ui-text-input-with-label ref="subtitleInput" v-model="batchDetails.subtitle" :disabled="!selectedBatchUsage.subtitle" :label="$strings.LabelSubtitle" class="mb-4 ml-4" />
+              <ui-text-input-with-label ref="subtitleInput" v-model="batchDetails.subtitle" :disabled="!selectedBatchUsage.subtitle" :label="$strings.LabelSubtitle" trim-whitespace class="mb-5 ml-4" />
             </div>
-            <div v-if="!isPodcastLibrary" class="flex items-center px-4 w-1/2">
+            <div v-if="!isPodcastLibrary" class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.authors" />
-              <!-- Authors filter only contains authors in this library, use query input to query all authors -->
-              <ui-multi-select-query-input ref="authorsSelect" v-model="batchDetails.authors" :disabled="!selectedBatchUsage.authors" :label="$strings.LabelAuthors" endpoint="authors/search" class="mb-4 ml-4" />
+              <!-- Authors filter only contains authors in this library, uses filter data -->
+              <ui-multi-select-query-input ref="authorsSelect" v-model="batchDetails.authors" :disabled="!selectedBatchUsage.authors" :label="$strings.LabelAuthors" filter-key="authors" class="mb-5 ml-4" />
             </div>
-            <div v-if="!isPodcastLibrary && !isMapAppend" class="flex items-center px-4 w-1/2">
+            <div v-if="!isPodcastLibrary && !isMapAppend" class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.publishedYear" />
-              <ui-text-input-with-label ref="publishedYearInput" v-model="batchDetails.publishedYear" :disabled="!selectedBatchUsage.publishedYear" :label="$strings.LabelPublishYear" class="mb-4 ml-4" />
+              <ui-text-input-with-label ref="publishedYearInput" v-model="batchDetails.publishedYear" :disabled="!selectedBatchUsage.publishedYear" :label="$strings.LabelPublishYear" trim-whitespace class="mb-5 ml-4" />
             </div>
-            <div v-if="!isPodcastLibrary" class="flex items-center px-4 w-1/2">
+            <div v-if="!isPodcastLibrary" class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.series" />
-              <ui-multi-select ref="seriesSelect" v-model="batchDetails.series" :disabled="!selectedBatchUsage.series" :label="$strings.LabelSeries" :items="existingSeriesNames" @newItem="newSeriesItem" @removedItem="removedSeriesItem" class="mb-4 ml-4" />
+              <ui-multi-select ref="seriesSelect" v-model="batchDetails.series" :disabled="!selectedBatchUsage.series" :label="$strings.LabelSeries" :items="existingSeriesNames" @newItem="newSeriesItem" @removedItem="removedSeriesItem" class="mb-5 ml-4" />
             </div>
-            <div class="flex items-center px-4 w-1/2">
+            <div class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.genres" />
-              <ui-multi-select ref="genresSelect" v-model="batchDetails.genres" :disabled="!selectedBatchUsage.genres" :label="$strings.LabelGenres" :items="genreItems" @newItem="newGenreItem" @removedItem="removedGenreItem" class="mb-4 ml-4" />
+              <ui-multi-select ref="genresSelect" v-model="batchDetails.genres" :disabled="!selectedBatchUsage.genres" :label="$strings.LabelGenres" :items="genreItems" @newItem="newGenreItem" @removedItem="removedGenreItem" class="mb-5 ml-4" />
             </div>
-            <div class="flex items-center px-4 w-1/2">
+            <div class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.tags" />
-              <ui-multi-select ref="tagsSelect" v-model="batchDetails.tags" :label="$strings.LabelTags" :disabled="!selectedBatchUsage.tags" :items="tagItems" @newItem="newTagItem" @removedItem="removedTagItem" class="mb-4 ml-4" />
+              <ui-multi-select ref="tagsSelect" v-model="batchDetails.tags" :label="$strings.LabelTags" :disabled="!selectedBatchUsage.tags" :items="tagItems" @newItem="newTagItem" @removedItem="removedTagItem" class="mb-5 ml-4" />
             </div>
-            <div v-if="!isPodcastLibrary" class="flex items-center px-4 w-1/2">
+            <div v-if="!isPodcastLibrary" class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.narrators" />
-              <ui-multi-select ref="narratorsSelect" v-model="batchDetails.narrators" :disabled="!selectedBatchUsage.narrators" :label="$strings.LabelNarrators" :items="narratorItems" @newItem="newNarratorItem" @removedItem="removedNarratorItem" class="mb-4 ml-4" />
+              <ui-multi-select ref="narratorsSelect" v-model="batchDetails.narrators" :disabled="!selectedBatchUsage.narrators" :label="$strings.LabelNarrators" :items="narratorItems" @newItem="newNarratorItem" @removedItem="removedNarratorItem" class="mb-5 ml-4" />
             </div>
-            <div v-if="!isPodcastLibrary && !isMapAppend" class="flex items-center px-4 w-1/2">
+            <div v-if="!isPodcastLibrary && !isMapAppend" class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.publisher" />
-              <ui-text-input-with-label ref="publisherInput" v-model="batchDetails.publisher" :disabled="!selectedBatchUsage.publisher" :label="$strings.LabelPublisher" class="mb-4 ml-4" />
+              <ui-text-input-with-label ref="publisherInput" v-model="batchDetails.publisher" :disabled="!selectedBatchUsage.publisher" :label="$strings.LabelPublisher" trim-whitespace class="mb-5 ml-4" />
             </div>
-            <div v-if="!isMapAppend" class="flex items-center px-4 w-1/2">
+            <div v-if="!isMapAppend" class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.language" />
-              <ui-text-input-with-label ref="languageInput" v-model="batchDetails.language" :disabled="!selectedBatchUsage.language" :label="$strings.LabelLanguage" class="mb-4 ml-4" />
+              <ui-text-input-with-label ref="languageInput" v-model="batchDetails.language" :disabled="!selectedBatchUsage.language" :label="$strings.LabelLanguage" trim-whitespace class="mb-5 ml-4" />
             </div>
-            <div v-if="!isMapAppend" class="flex items-center px-4 w-1/2">
+            <div v-if="!isMapAppend" class="flex items-center px-4 h-18 w-1/2">
               <ui-checkbox v-model="selectedBatchUsage.explicit" />
               <div class="ml-4">
                 <ui-checkbox
@@ -71,8 +71,27 @@
                 />
               </div>
             </div>
+            <div v-if="!isPodcastLibrary && !isMapAppend" class="flex items-center px-4 h-18 w-1/2">
+              <ui-checkbox v-model="selectedBatchUsage.abridged" />
+              <div class="ml-4">
+                <ui-checkbox
+                  v-model="batchDetails.abridged"
+                  :label="$strings.LabelAbridged"
+                  :disabled="!selectedBatchUsage.abridged"
+                  :checkbox-bg="!selectedBatchUsage.abridged ? 'bg' : 'primary'"
+                  :check-color="!selectedBatchUsage.abridged ? 'gray-600' : 'green-500'"
+                  border-color="gray-600"
+                  :label-class="!selectedBatchUsage.abridged ? 'pl-2 text-base text-gray-400 font-semibold' : 'pl-2 text-base font-semibold'"
+                />
+              </div>
+            </div>
 
-            <div class="w-full flex items-center justify-end p-4">
+            <div class="w-full flex items-center p-4 space-x-2">
+              <ui-btn small @click.stop="resetMapDetails">{{ $strings.ButtonReset }}</ui-btn>
+              <ui-tooltip direction="bottom" :text="$strings.MessageBatchEditPopulateMapDetailsAllHelp">
+                <ui-btn small :disabled="!hasSelectedBatchUsage" @click.stop="populateFromExisting()">{{ $strings.ButtonBatchEditPopulateFromExisting }}</ui-btn>
+              </ui-tooltip>
+              <div class="flex-grow" />
               <ui-btn color="success" :disabled="!hasSelectedBatchUsage" :padding-x="8" small class="text-base" :loading="isProcessing" @click="mapBatchDetails">{{ $strings.ButtonApply }}</ui-btn>
             </div>
           </div>
@@ -83,8 +102,13 @@
     <div class="flex justify-center flex-wrap">
       <template v-for="libraryItem in libraryItemCopies">
         <div :key="libraryItem.id" class="w-full max-w-3xl border border-black-300 p-6 -ml-px -mt-px">
-          <widgets-book-details-edit v-if="libraryItem.mediaType === 'book'" :ref="`itemForm-${libraryItem.id}`" :library-item="libraryItem" />
-          <widgets-podcast-details-edit v-else :ref="`itemForm-${libraryItem.id}`" :library-item="libraryItem" />
+          <div class="flex items-center justify-end">
+            <ui-tooltip direction="bottom" :text="$strings.MessageBatchEditPopulateMapDetailsItemHelp">
+              <ui-btn small :disabled="!hasSelectedBatchUsage" @click="populateFromExisting(libraryItem.id)">{{ $strings.ButtonBatchEditPopulateMapDetails }}</ui-btn>
+            </ui-tooltip>
+          </div>
+          <widgets-book-details-edit v-if="libraryItem.mediaType === 'book'" :ref="`itemForm-${libraryItem.id}`" :library-item="libraryItem" @change="handleItemChange" />
+          <widgets-podcast-details-edit v-else :ref="`itemForm-${libraryItem.id}`" :library-item="libraryItem" @change="handleItemChange" />
         </div>
       </template>
     </div>
@@ -94,7 +118,7 @@
 
     <div :class="isScrollable ? 'fixed left-0 box-shadow-lg-up bg-primary' : ''" class="w-full h-20 px-4 flex items-center border-t border-bg z-40" :style="{ bottom: streamLibraryItem ? '165px' : '0px' }">
       <div class="flex-grow" />
-      <ui-btn color="success" :padding-x="8" class="text-lg" :loading="isProcessing" @click.prevent="saveClick">{{ $strings.ButtonSave }}</ui-btn>
+      <ui-btn color="success" :padding-x="8" class="text-lg" :loading="isProcessing" :disabled="!hasChanges" @click.prevent="saveClick">{{ $strings.ButtonSave }}</ui-btn>
     </div>
   </div>
 </template>
@@ -139,7 +163,8 @@ export default {
         narrators: [],
         publisher: null,
         language: null,
-        explicit: false
+        explicit: false,
+        abridged: false
       },
       selectedBatchUsage: {
         subtitle: false,
@@ -151,10 +176,12 @@ export default {
         narrators: false,
         publisher: false,
         language: false,
-        explicit: false
+        explicit: false,
+        abridged: false
       },
       appendableKeys: ['authors', 'genres', 'tags', 'narrators', 'series'],
-      openMapOptions: false
+      openMapOptions: false,
+      itemsWithChanges: []
     }
   },
   computed: {
@@ -205,9 +232,101 @@ export default {
     },
     hasSelectedBatchUsage() {
       return Object.values(this.selectedBatchUsage).some((b) => !!b)
+    },
+    hasChanges() {
+      return this.itemsWithChanges.length > 0
     }
   },
   methods: {
+    resetMapDetails() {
+      this.blurBatchForm()
+      this.batchDetails = {
+        subtitle: null,
+        authors: null,
+        publishedYear: null,
+        series: [],
+        genres: [],
+        tags: [],
+        narrators: [],
+        publisher: null,
+        language: null,
+        explicit: false,
+        abridged: false
+      }
+      this.selectedBatchUsage = {
+        subtitle: false,
+        authors: false,
+        publishedYear: false,
+        series: false,
+        genres: false,
+        tags: false,
+        narrators: false,
+        publisher: false,
+        language: false,
+        explicit: false,
+        abridged: false
+      }
+    },
+    populateFromExisting(libraryItemId) {
+      this.blurBatchForm()
+
+      let libraryItemsToMap = this.libraryItemCopies
+      if (libraryItemId) {
+        libraryItemsToMap = this.libraryItemCopies.filter((li) => li.id === libraryItemId)
+      }
+
+      for (const key in this.selectedBatchUsage) {
+        if (!this.selectedBatchUsage[key]) continue
+        if (this.isMapAppend && !this.appendableKeys.includes(key)) continue
+
+        let existingValues = undefined
+        libraryItemsToMap.forEach((li) => {
+          if (key === 'tags') {
+            if (!existingValues) existingValues = []
+            li.media.tags.forEach((tag) => {
+              if (!existingValues.includes(tag)) {
+                existingValues.push(tag)
+              }
+            })
+          } else if (key === 'authors') {
+            if (!existingValues) existingValues = []
+            li.media.metadata[key].forEach((entity) => {
+              if (!existingValues.some((au) => au.id === entity.id)) {
+                existingValues.push({
+                  id: entity.id,
+                  name: entity.name
+                })
+              }
+            })
+          } else if (key === 'series') {
+            if (!existingValues) existingValues = []
+            li.media.metadata[key].forEach((entity) => {
+              if (!existingValues.includes(entity.name)) {
+                existingValues.push(entity.name)
+              }
+            })
+          } else if (key === 'genres' || key === 'narrators') {
+            if (!existingValues) existingValues = []
+            li.media.metadata[key].forEach((item) => {
+              if (!existingValues.includes(item)) {
+                existingValues.push(item)
+              }
+            })
+          } else if (existingValues === undefined) {
+            existingValues = li.media.metadata[key]
+          }
+        })
+
+        this.batchDetails[key] = existingValues
+      }
+    },
+    handleItemChange(itemChange) {
+      if (!itemChange.hasChanges) {
+        this.itemsWithChanges = this.itemsWithChanges.filter((id) => id !== itemChange.libraryItemId)
+      } else if (!this.itemsWithChanges.includes(itemChange.libraryItemId)) {
+        this.itemsWithChanges.push(itemChange.libraryItemId)
+      }
+    },
     blurBatchForm() {
       if (this.$refs.seriesSelect && this.$refs.seriesSelect.isFocused) {
         this.$refs.seriesSelect.forceBlur()
@@ -267,38 +386,10 @@ export default {
     removedSeriesItem(item) {},
     newNarratorItem(item) {},
     removedNarratorItem(item) {},
-    newTagItem(item) {
-      // if (item && !this.newTagItems.includes(item)) {
-      //   this.newTagItems.push(item)
-      // }
-    },
-    removedTagItem(item) {
-      // If newly added, remove if not used on any other items
-      // if (item && this.newTagItems.includes(item)) {
-      //   var usedByOtherAb = this.libraryItemCopies.find((ab) => {
-      //     return ab.tags && ab.tags.includes(item)
-      //   })
-      //   if (!usedByOtherAb) {
-      //     this.newTagItems = this.newTagItems.filter((t) => t !== item)
-      //   }
-      // }
-    },
-    newGenreItem(item) {
-      // if (item && !this.newGenreItems.includes(item)) {
-      //   this.newGenreItems.push(item)
-      // }
-    },
-    removedGenreItem(item) {
-      // If newly added, remove if not used on any other items
-      // if (item && this.newGenreItems.includes(item)) {
-      //   var usedByOtherAb = this.libraryItemCopies.find((ab) => {
-      //     return ab.book.genres && ab.book.genres.includes(item)
-      //   })
-      //   if (!usedByOtherAb) {
-      //     this.newGenreItems = this.newGenreItems.filter((t) => t !== item)
-      //   }
-      // }
-    },
+    newTagItem(item) {},
+    removedTagItem(item) {},
+    newGenreItem(item) {},
+    removedGenreItem(item) {},
     init() {
       // TODO: Better deep cloning of library items
       this.libraryItemCopies = this.libraryItems.map((li) => {
@@ -350,7 +441,7 @@ export default {
         }
       }
       if (!updates.length) {
-        return this.$toast.warning('No updates were made')
+        return this.$toast.warning(this.$strings.ToastNoUpdatesNecessary)
       }
 
       console.log('Pushing updates', updates)
@@ -360,6 +451,7 @@ export default {
         .then((data) => {
           this.isProcessing = false
           if (data.updates) {
+            this.itemsWithChanges = []
             this.$toast.success(`Successfully updated ${data.updates} items`)
             this.$router.replace(`/library/${this.currentLibraryId}/bookshelf`)
           } else {
@@ -371,10 +463,28 @@ export default {
           this.$toast.error('Failed to batch update')
           this.isProcessing = false
         })
+    },
+    beforeUnload(e) {
+      if (!e || !this.hasChanges) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+  },
+  beforeRouteLeave(to, from, next) {
+    if (this.hasChanges) {
+      next(false)
+      window.location = to.path
+    } else {
+      next()
     }
   },
   mounted() {
     this.init()
+
+    window.addEventListener('beforeunload', this.beforeUnload)
+  },
+  beforeDestroy() {
+    window.removeEventListener('beforeunload', this.beforeUnload)
   }
 }
 </script>

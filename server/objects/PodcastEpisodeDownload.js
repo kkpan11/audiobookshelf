@@ -1,19 +1,24 @@
 const Path = require('path')
-const { getId } = require('../utils/index')
-const { sanitizeFilename } = require('../utils/fileUtils')
+const uuidv4 = require('uuid').v4
+const { sanitizeFilename, filePathToPOSIX } = require('../utils/fileUtils')
 const globals = require('../utils/globals')
 
 class PodcastEpisodeDownload {
   constructor() {
     this.id = null
-    this.podcastEpisode = null
+    /** @type {import('../utils/podcastUtils').RssPodcastEpisode} */
+    this.rssPodcastEpisode = null
+
     this.url = null
+    /** @type {import('../models/LibraryItem')} */
     this.libraryItem = null
     this.libraryId = null
 
     this.isAutoDownload = false
     this.isFinished = false
     this.failed = false
+
+    this.appendRandomId = false
 
     this.startedAt = null
     this.createdAt = null
@@ -23,21 +28,22 @@ class PodcastEpisodeDownload {
   toJSONForClient() {
     return {
       id: this.id,
-      episodeDisplayTitle: this.podcastEpisode?.title ?? null,
+      episodeDisplayTitle: this.rssPodcastEpisode?.title ?? null,
       url: this.url,
-      libraryItemId: this.libraryItem?.id || null,
+      libraryItemId: this.libraryItemId,
       libraryId: this.libraryId || null,
       isFinished: this.isFinished,
       failed: this.failed,
+      appendRandomId: this.appendRandomId,
       startedAt: this.startedAt,
       createdAt: this.createdAt,
       finishedAt: this.finishedAt,
-      podcastTitle: this.libraryItem?.media.metadata.title ?? null,
-      podcastExplicit: !!this.libraryItem?.media.metadata.explicit,
-      season: this.podcastEpisode?.season ?? null,
-      episode: this.podcastEpisode?.episode ?? null,
-      episodeType: this.podcastEpisode?.episodeType ?? 'full',
-      publishedAt: this.podcastEpisode?.publishedAt ?? null
+      podcastTitle: this.libraryItem?.media.title ?? null,
+      podcastExplicit: !!this.libraryItem?.media.explicit,
+      season: this.rssPodcastEpisode?.season ?? null,
+      episode: this.rssPodcastEpisode?.episode ?? null,
+      episodeType: this.rssPodcastEpisode?.episodeType ?? 'full',
+      publishedAt: this.rssPodcastEpisode?.publishedAt ?? null
     }
   }
 
@@ -50,26 +56,56 @@ class PodcastEpisodeDownload {
     if (globals.SupportedAudioTypes.includes(extname)) return extname
     return 'mp3'
   }
-
+  get enclosureType() {
+    const enclosureType = this.rssPodcastEpisode.enclosure.type
+    return typeof enclosureType === 'string' ? enclosureType : null
+  }
+  /**
+   * RSS feed may have an episode with file extension of mp3 but the specified enclosure type is not mpeg.
+   * @see https://github.com/advplyr/audiobookshelf/issues/3711
+   *
+   * @returns {boolean}
+   */
+  get isMp3() {
+    if (this.enclosureType && !this.enclosureType.includes('mpeg')) return false
+    return this.fileExtension === 'mp3'
+  }
+  get episodeTitle() {
+    return this.rssPodcastEpisode.title
+  }
   get targetFilename() {
-    return sanitizeFilename(`${this.podcastEpisode.title}.${this.fileExtension}`)
+    const appendage = this.appendRandomId ? ` (${this.id})` : ''
+    const filename = `${this.rssPodcastEpisode.title}${appendage}.${this.fileExtension}`
+    return sanitizeFilename(filename)
   }
   get targetPath() {
-    return Path.join(this.libraryItem.path, this.targetFilename)
+    return filePathToPOSIX(Path.join(this.libraryItem.path, this.targetFilename))
   }
   get targetRelPath() {
     return this.targetFilename
   }
   get libraryItemId() {
-    return this.libraryItem ? this.libraryItem.id : null
+    return this.libraryItem?.id || null
+  }
+  get pubYear() {
+    if (!this.rssPodcastEpisode.publishedAt) return null
+    return new Date(this.rssPodcastEpisode.publishedAt).getFullYear()
   }
 
-  setData(podcastEpisode, libraryItem, isAutoDownload, libraryId) {
-    this.id = getId('epdl')
-    this.podcastEpisode = podcastEpisode
+  /**
+   *
+   * @param {import('../utils/podcastUtils').RssPodcastEpisode} rssPodcastEpisode - from rss feed
+   * @param {import('../models/LibraryItem')} libraryItem
+   * @param {*} isAutoDownload
+   * @param {*} libraryId
+   */
+  setData(rssPodcastEpisode, libraryItem, isAutoDownload, libraryId) {
+    this.id = uuidv4()
+    this.rssPodcastEpisode = rssPodcastEpisode
 
-    const url = podcastEpisode.enclosure.url
-    if (decodeURIComponent(url) !== url) { // Already encoded
+    const url = rssPodcastEpisode.enclosure.url
+    if (decodeURIComponent(url) !== url) {
+      // Already encoded
       this.url = url
     } else {
       this.url = encodeURI(url)

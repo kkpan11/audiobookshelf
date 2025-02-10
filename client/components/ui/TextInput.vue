@@ -1,11 +1,14 @@
 <template>
   <div ref="wrapper" class="relative">
-    <input :id="inputId" ref="input" v-model="inputValue" :type="actualType" :readonly="readonly" :disabled="disabled" :placeholder="placeholder" class="rounded bg-primary text-gray-200 focus:border-gray-300 focus:bg-bg focus:outline-none border border-gray-600 h-full w-full" :class="classList" @keyup="keyup" @change="change" @focus="focused" @blur="blurred" />
+    <input :id="inputId" :name="inputName" ref="input" v-model="inputValue" :type="actualType" :step="step" :min="min" :readonly="readonly" :disabled="disabled" :placeholder="placeholder" dir="auto" class="rounded bg-primary text-gray-200 focus:bg-bg focus:outline-none border h-full w-full" :class="classList" @keyup="keyup" @change="change" @focus="focused" @blur="blurred" />
     <div v-if="clearable && inputValue" class="absolute top-0 right-0 h-full px-2 flex items-center justify-center">
-      <span class="material-icons text-gray-300 cursor-pointer" style="font-size: 1.1rem" @click.stop.prevent="clear">close</span>
+      <span class="material-symbols text-gray-300 cursor-pointer" style="font-size: 1.1rem" @click.stop.prevent="clear">close</span>
     </div>
     <div v-if="type === 'password' && isHovering" class="absolute top-0 right-0 h-full px-4 flex items-center justify-center">
-      <span class="material-icons-outlined text-gray-400 cursor-pointer text-lg" @click.stop.prevent="showPassword = !showPassword">{{ !showPassword ? 'visibility' : 'visibility_off' }}</span>
+      <span class="material-symbols text-gray-400 cursor-pointer text-lg" @click.stop.prevent="showPassword = !showPassword">{{ !showPassword ? 'visibility' : 'visibility_off' }}</span>
+    </div>
+    <div v-else-if="showCopy" class="absolute top-0 right-0 h-full px-2 flex items-center justify-center">
+      <span class="material-symbols cursor-pointer text-lg" :class="hasCopied ? 'text-success' : 'text-gray-400 hover:text-white'" @click.stop.prevent="copyToClipboard">{{ !hasCopied ? 'content_copy' : 'done' }}</span>
     </div>
   </div>
 </template>
@@ -32,13 +35,21 @@ export default {
     noSpinner: Boolean,
     textCenter: Boolean,
     clearable: Boolean,
-    inputId: String
+    inputId: String,
+    inputName: String,
+    showCopy: Boolean,
+    step: [String, Number],
+    min: [String, Number],
+    customInputClass: String,
+    trimWhitespace: Boolean
   },
   data() {
     return {
       showPassword: false,
       isHovering: false,
-      isFocused: false
+      isFocused: false,
+      hasCopied: null,
+      isInvalidDate: false
     }
   },
   computed: {
@@ -52,10 +63,20 @@ export default {
     },
     classList() {
       var _list = []
-      _list.push(`px-${this.paddingX}`)
+      if (this.showCopy) {
+        _list.push('pl-3', 'pr-8')
+      } else {
+        _list.push(`px-${this.paddingX}`)
+      }
+
       _list.push(`py-${this.paddingY}`)
       if (this.noSpinner) _list.push('no-spinner')
       if (this.textCenter) _list.push('text-center')
+      if (this.customInputClass) _list.push(this.customInputClass)
+
+      if (this.isInvalidDate) _list.push('border-error')
+      else _list.push('focus:border-gray-300 border-gray-600')
+
       return _list.join(' ')
     },
     actualType() {
@@ -64,22 +85,43 @@ export default {
     }
   },
   methods: {
+    copyToClipboard() {
+      clearTimeout(this.hasCopied)
+      this.$copyToClipboard(this.inputValue).then((success) => {
+        this.hasCopied = setTimeout(() => {
+          this.hasCopied = null
+        }, 2000)
+      })
+    },
     clear() {
       this.inputValue = ''
+      this.$emit('clear')
     },
     focused() {
       this.isFocused = true
       this.$emit('focus')
     },
     blurred() {
+      if (this.trimWhitespace && typeof this.inputValue === 'string') {
+        this.inputValue = this.inputValue.trim()
+      }
       this.isFocused = false
       this.$emit('blur')
     },
+
     change(e) {
       this.$emit('change', e.target.value)
     },
     keyup(e) {
       this.$emit('keyup', e)
+
+      if (this.type === 'datetime-local') {
+        if (e.target.validity?.badInput) {
+          this.isInvalidDate = true
+        } else {
+          this.isInvalidDate = false
+        }
+      }
     },
     blur() {
       if (this.$refs.input) this.$refs.input.blur()

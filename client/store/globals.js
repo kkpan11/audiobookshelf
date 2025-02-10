@@ -10,7 +10,9 @@ export const state = () => ({
   showEditPodcastEpisode: false,
   showViewPodcastEpisodeModal: false,
   showRSSFeedOpenCloseModal: false,
+  showShareModal: false,
   showConfirmPrompt: false,
+  showRawCoverPreviewModal: false,
   confirmPromptOptions: null,
   showEditAuthorModal: false,
   rssFeedEntity: null,
@@ -20,6 +22,8 @@ export const state = () => ({
   selectedCollection: null,
   selectedAuthor: null,
   selectedMediaItems: [],
+  selectedRawCoverUrl: null,
+  selectedMediaItemShare: null,
   isCasting: false, // Actively casting
   isChromecastInitialized: false, // Script loadeds
   showBatchQuickMatchModal: false,
@@ -68,46 +72,42 @@ export const state = () => ({
     }
   ],
   podcastTypes: [
-    { text: 'Episodic', value: 'episodic' },
-    { text: 'Serial', value: 'serial' }
+    { text: 'Episodic', value: 'episodic', descriptionKey: 'LabelEpisodic' },
+    { text: 'Serial', value: 'serial', descriptionKey: 'LabelSerial' }
   ],
   episodeTypes: [
-    { text: 'Full', value: 'full' },
-    { text: 'Trailer', value: 'trailer' },
-    { text: 'Bonus', value: 'bonus' }
+    { text: 'Full', value: 'full', descriptionKey: 'LabelFull' },
+    { text: 'Trailer', value: 'trailer', descriptionKey: 'LabelTrailer' },
+    { text: 'Bonus', value: 'bonus', descriptionKey: 'LabelBonus' }
   ],
   libraryIcons: ['database', 'audiobookshelf', 'books-1', 'books-2', 'book-1', 'microphone-1', 'microphone-3', 'radio', 'podcast', 'rss', 'headphones', 'music', 'file-picture', 'rocket', 'power', 'star', 'heart']
 })
 
 export const getters = {
-  getLibraryItemCoverSrc: (state, getters, rootState, rootGetters) => (libraryItem, placeholder = null) => {
-    if (!placeholder) placeholder = `${rootState.routerBasePath}/book_placeholder.jpg`
-    if (!libraryItem) return placeholder
-    var media = libraryItem.media
-    if (!media || !media.coverPath || media.coverPath === placeholder) return placeholder
+  getLibraryItemCoverSrc:
+    (state, getters, rootState, rootGetters) =>
+    (libraryItem, placeholder = null, raw = false) => {
+      if (!placeholder) placeholder = `${rootState.routerBasePath}/book_placeholder.jpg`
+      if (!libraryItem) return placeholder
+      const media = libraryItem.media
+      if (!media?.coverPath || media.coverPath === placeholder) return placeholder
 
-    // Absolute URL covers (should no longer be used)
-    if (media.coverPath.startsWith('http:') || media.coverPath.startsWith('https:')) return media.coverPath
+      // Absolute URL covers (should no longer be used)
+      if (media.coverPath.startsWith('http:') || media.coverPath.startsWith('https:')) return media.coverPath
 
-    const userToken = rootGetters['user/getToken']
-    const lastUpdate = libraryItem.updatedAt || Date.now()
-    const libraryItemId = libraryItem.libraryItemId || libraryItem.id // Workaround for /users/:id page showing media progress covers
-
-    if (process.env.NODE_ENV !== 'production') { // Testing
-      return `http://localhost:3333${rootState.routerBasePath}/api/items/${libraryItemId}/cover?token=${userToken}&ts=${lastUpdate}`
-    }
-
-    return `${rootState.routerBasePath}/api/items/${libraryItemId}/cover?token=${userToken}&ts=${lastUpdate}`
-  },
-  getLibraryItemCoverSrcById: (state, getters, rootState, rootGetters) => (libraryItemId, placeholder = null, raw = false) => {
-    if (!placeholder) placeholder = `${rootState.routerBasePath}/book_placeholder.jpg`
-    if (!libraryItemId) return placeholder
-    var userToken = rootGetters['user/getToken']
-    if (process.env.NODE_ENV !== 'production') { // Testing
-      return `http://localhost:3333${rootState.routerBasePath}/api/items/${libraryItemId}/cover?token=${userToken}${raw ? '&raw=1' : ''}`
-    }
-    return `${rootState.routerBasePath}/api/items/${libraryItemId}/cover?token=${userToken}${raw ? '&raw=1' : ''}`
-  },
+      const userToken = rootGetters['user/getToken']
+      const lastUpdate = libraryItem.updatedAt || Date.now()
+      const libraryItemId = libraryItem.libraryItemId || libraryItem.id // Workaround for /users/:id page showing media progress covers
+      return `${rootState.routerBasePath}/api/items/${libraryItemId}/cover?ts=${lastUpdate}${raw ? '&raw=1' : ''}`
+    },
+  getLibraryItemCoverSrcById:
+    (state, getters, rootState, rootGetters) =>
+    (libraryItemId, timestamp = null, raw = false) => {
+      const placeholder = `${rootState.routerBasePath}/book_placeholder.jpg`
+      if (!libraryItemId) return placeholder
+      const userToken = rootGetters['user/getToken']
+      return `${rootState.routerBasePath}/api/items/${libraryItemId}/cover?${raw ? '&raw=1' : ''}${timestamp ? `&ts=${timestamp}` : ''}`
+    },
   getIsBatchSelectingMediaItems: (state) => {
     return state.selectedMediaItems.length
   }
@@ -149,12 +149,26 @@ export const mutations = {
     state.rssFeedEntity = entity
     state.showRSSFeedOpenCloseModal = true
   },
+  setShowShareModal(state, val) {
+    state.showShareModal = val
+  },
+  setShareModal(state, mediaItemShare) {
+    state.selectedMediaItemShare = mediaItemShare
+    state.showShareModal = true
+  },
   setShowConfirmPrompt(state, val) {
     state.showConfirmPrompt = val
   },
   setConfirmPrompt(state, options) {
     state.confirmPromptOptions = options
     state.showConfirmPrompt = true
+  },
+  setShowRawCoverPreviewModal(state, val) {
+    state.showRawCoverPreviewModal = val
+  },
+  setRawCoverPreviewModal(state, rawCoverUrl) {
+    state.selectedRawCoverUrl = rawCoverUrl
+    state.showRawCoverPreviewModal = true
   },
   setEditCollection(state, collection) {
     state.selectedCollection = collection
@@ -193,17 +207,16 @@ export const mutations = {
     state.selectedMediaItems = []
   },
   toggleMediaItemSelected(state, item) {
-    if (state.selectedMediaItems.some(i => i.id === item.id)) {
-      state.selectedMediaItems = state.selectedMediaItems.filter(i => i.id !== item.id)
+    if (state.selectedMediaItems.some((i) => i.id === item.id)) {
+      state.selectedMediaItems = state.selectedMediaItems.filter((i) => i.id !== item.id)
     } else {
       state.selectedMediaItems.push(item)
     }
   },
   setMediaItemSelected(state, { item, selected }) {
-    const isAlreadySelected = state.selectedMediaItems.some(i => i.id === item.id)
+    const isAlreadySelected = state.selectedMediaItems.some((i) => i.id === item.id)
     if (isAlreadySelected && !selected) {
-      state.selectedMediaItems = state.selectedMediaItems.filter(i => i.id !== item.id)
-
+      state.selectedMediaItems = state.selectedMediaItems.filter((i) => i.id !== item.id)
     } else if (selected && !isAlreadySelected) {
       state.selectedMediaItems.push(item)
     }

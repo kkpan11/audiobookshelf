@@ -1,725 +1,108 @@
-const fs = require('../libs/fsExtra')
-const Path = require('path')
 const Logger = require('../Logger')
 const SocketAuthority = require('../SocketAuthority')
+const Database = require('../Database')
+const { getTitleIgnorePrefix } = require('../utils/index')
 
 // Utils
-const { groupFilesIntoLibraryItemPaths, getLibraryItemFileData, scanFolder } = require('../utils/scandir')
-const { comparePaths } = require('../utils/index')
-const { getIno, filePathToPOSIX } = require('../utils/fileUtils')
-const { ScanResult, LogLevel } = require('../utils/constants')
 const { findMatchingEpisodesInFeed, getPodcastFeed } = require('../utils/podcastUtils')
 
-const MediaFileScanner = require('./MediaFileScanner')
 const BookFinder = require('../finders/BookFinder')
 const PodcastFinder = require('../finders/PodcastFinder')
-const LibraryItem = require('../objects/LibraryItem')
 const LibraryScan = require('./LibraryScan')
-const ScanOptions = require('./ScanOptions')
+const LibraryScanner = require('./LibraryScanner')
+const CoverManager = require('../managers/CoverManager')
+const TaskManager = require('../managers/TaskManager')
 
-const Author = require('../objects/entities/Author')
-const Series = require('../objects/entities/Series')
+/**
+ * @typedef QuickMatchOptions
+ * @property {string} [provider]
+ * @property {string} [title]
+ * @property {string} [author]
+ * @property {string} [isbn] - This override is currently unused in Abs clients
+ * @property {string} [asin] - This override is currently unused in Abs clients
+ * @property {boolean} [overrideCover]
+ * @property {boolean} [overrideDetails]
+ */
 
 class Scanner {
-  constructor(db, coverManager) {
-    this.db = db
-    this.coverManager = coverManager
-
-    this.cancelLibraryScan = {}
-    this.librariesScanning = []
-
-    // Watcher file update scan vars
-    this.pendingFileUpdatesToScan = []
-    this.scanningFilesChanged = false
-
-    this.bookFinder = new BookFinder()
-    this.podcastFinder = new PodcastFinder()
-  }
-
-  isLibraryScanning(libraryId) {
-    return this.librariesScanning.find(ls => ls.id === libraryId)
-  }
-
-  setCancelLibraryScan(libraryId) {
-    var libraryScanning = this.librariesScanning.find(ls => ls.id === libraryId)
-    if (!libraryScanning) return
-    this.cancelLibraryScan[libraryId] = true
-  }
-
-  async scanLibraryItemById(libraryItemId) {
-    const libraryItem = this.db.libraryItems.find(li => li.id === libraryItemId)
-    if (!libraryItem) {
-      Logger.error(`[Scanner] Scan libraryItem by id not found ${libraryItemId}`)
-      return ScanResult.NOTHING
-    }
-    const library = this.db.libraries.find(lib => lib.id === libraryItem.libraryId)
-    if (!library) {
-      Logger.error(`[Scanner] Scan libraryItem by id library not found "${libraryItem.libraryId}"`)
-      return ScanResult.NOTHING
-    }
-    const folder = library.folders.find(f => f.id === libraryItem.folderId)
-    if (!folder) {
-      Logger.error(`[Scanner] Scan libraryItem by id folder not found "${libraryItem.folderId}" in library "${library.name}"`)
-      return ScanResult.NOTHING
-    }
-    Logger.info(`[Scanner] Scanning Library Item "${libraryItem.media.metadata.title}"`)
-    return this.scanLibraryItem(library.mediaType, folder, libraryItem)
-  }
-
-  async scanLibraryItem(libraryMediaType, folder, libraryItem) {
-    // TODO: Support for single media item
-    const libraryItemData = await getLibraryItemFileData(libraryMediaType, folder, libraryItem.path, false, this.db.serverSettings)
-    if (!libraryItemData) {
-      return ScanResult.NOTHING
-    }
-    let hasUpdated = false
-
-    const checkRes = libraryItem.checkScanData(libraryItemData)
-    if (checkRes.updated) hasUpdated = true
-
-    // Sync other files first so that local images are used as cover art
-    if (await libraryItem.syncFiles(this.db.serverSettings.scannerPreferOpfMetadata)) {
-      hasUpdated = true
-    }
-
-    // Scan all audio files
-    if (libraryItem.hasAudioFiles) {
-      const libraryAudioFiles = libraryItem.libraryFiles.filter(lf => lf.fileType === 'audio')
-      if (await MediaFileScanner.scanMediaFiles(libraryAudioFiles, libraryItem)) {
-        hasUpdated = true
-      }
-
-      // Extract embedded cover art if cover is not already in directory
-      if (libraryItem.media.hasEmbeddedCoverArt && !libraryItem.media.coverPath) {
-        const coverPath = await this.coverManager.saveEmbeddedCoverArt(libraryItem)
-        if (coverPath) {
-          Logger.debug(`[Scanner] Saved embedded cover art "${coverPath}"`)
-          hasUpdated = true
-        }
-      }
-    }
-
-    await this.createNewAuthorsAndSeries(libraryItem)
-
-    // Library Item is invalid - (a book has no audio files or ebook files)
-    if (!libraryItem.hasMediaEntities && libraryItem.mediaType !== 'podcast') {
-      libraryItem.setInvalid()
-      hasUpdated = true
-    } else if (libraryItem.isInvalid) {
-      libraryItem.isInvalid = false
-      hasUpdated = true
-    }
-
-    if (hasUpdated) {
-      SocketAuthority.emitter('item_updated', libraryItem.toJSONExpanded())
-      await this.db.updateLibraryItem(libraryItem)
-      return ScanResult.UPDATED
-    }
-    return ScanResult.UPTODATE
-  }
-
-  async scan(library, options = {}) {
-    if (this.isLibraryScanning(library.id)) {
-      Logger.error(`[Scanner] Already scanning ${library.id}`)
-      return
-    }
-
-    if (!library.folders.length) {
-      Logger.warn(`[Scanner] Library has no folders to scan "${library.name}"`)
-      return
-    }
-
-    var scanOptions = new ScanOptions()
-    scanOptions.setData(options, this.db.serverSettings)
-
-    var libraryScan = new LibraryScan()
-    libraryScan.setData(library, scanOptions)
-    libraryScan.verbose = false
-    this.librariesScanning.push(libraryScan.getScanEmitData)
-
-    SocketAuthority.emitter('scan_start', libraryScan.getScanEmitData)
-
-    Logger.info(`[Scanner] Starting library scan ${libraryScan.id} for ${libraryScan.libraryName}`)
-
-    var canceled = await this.scanLibrary(libraryScan)
-
-    if (canceled) {
-      Logger.info(`[Scanner] Library scan canceled for "${libraryScan.libraryName}"`)
-      delete this.cancelLibraryScan[libraryScan.libraryId]
-    }
-
-    libraryScan.setComplete()
-
-    Logger.info(`[Scanner] Library scan ${libraryScan.id} completed in ${libraryScan.elapsedTimestamp} | ${libraryScan.resultStats}`)
-    this.librariesScanning = this.librariesScanning.filter(ls => ls.id !== library.id)
-
-    if (canceled && !libraryScan.totalResults) {
-      var emitData = libraryScan.getScanEmitData
-      emitData.results = null
-      SocketAuthority.emitter('scan_complete', emitData)
-      return
-    }
-
-    SocketAuthority.emitter('scan_complete', libraryScan.getScanEmitData)
-
-    if (libraryScan.totalResults) {
-      libraryScan.saveLog()
-    }
-  }
-
-  async scanLibrary(libraryScan) {
-    let libraryItemDataFound = []
-
-    // Scan each library
-    for (let i = 0; i < libraryScan.folders.length; i++) {
-      const folder = libraryScan.folders[i]
-      const itemDataFoundInFolder = await scanFolder(libraryScan.libraryMediaType, folder, this.db.serverSettings)
-      libraryScan.addLog(LogLevel.INFO, `${itemDataFoundInFolder.length} item data found in folder "${folder.fullPath}"`)
-      libraryItemDataFound = libraryItemDataFound.concat(itemDataFoundInFolder)
-    }
-
-    if (this.cancelLibraryScan[libraryScan.libraryId]) return true
-
-    // Remove items with no inode
-    libraryItemDataFound = libraryItemDataFound.filter(lid => lid.ino)
-    const libraryItemsInLibrary = this.db.libraryItems.filter(li => li.libraryId === libraryScan.libraryId)
-
-    const MaxSizePerChunk = 2.5e9
-    const itemDataToRescanChunks = []
-    const newItemDataToScanChunks = []
-    let itemsToUpdate = []
-    let itemDataToRescan = []
-    let itemDataToRescanSize = 0
-    let newItemDataToScan = []
-    let newItemDataToScanSize = 0
-    const itemsToFindCovers = []
-
-    // Check for existing & removed library items
-    for (let i = 0; i < libraryItemsInLibrary.length; i++) {
-      const libraryItem = libraryItemsInLibrary[i]
-      // Find library item folder with matching inode or matching path
-      const dataFound = libraryItemDataFound.find(lid => lid.ino === libraryItem.ino || comparePaths(lid.relPath, libraryItem.relPath))
-      if (!dataFound) {
-        libraryScan.addLog(LogLevel.WARN, `Library Item "${libraryItem.media.metadata.title}" is missing`)
-        Logger.warn(`[Scanner] Library item "${libraryItem.media.metadata.title}" is missing (inode "${libraryItem.ino}")`)
-        libraryScan.resultsMissing++
-        libraryItem.setMissing()
-        itemsToUpdate.push(libraryItem)
-      } else {
-        const checkRes = libraryItem.checkScanData(dataFound)
-        if (checkRes.newLibraryFiles.length || libraryScan.scanOptions.forceRescan) { // Item has new files
-          checkRes.libraryItem = libraryItem
-          checkRes.scanData = dataFound
-
-          // If this item will go over max size then push current chunk
-          if (libraryItem.audioFileTotalSize + itemDataToRescanSize > MaxSizePerChunk && itemDataToRescan.length > 0) {
-            itemDataToRescanChunks.push(itemDataToRescan)
-            itemDataToRescanSize = 0
-            itemDataToRescan = []
-          }
-
-          itemDataToRescan.push(checkRes)
-          itemDataToRescanSize += libraryItem.audioFileTotalSize
-          if (itemDataToRescanSize >= MaxSizePerChunk) {
-            itemDataToRescanChunks.push(itemDataToRescan)
-            itemDataToRescanSize = 0
-            itemDataToRescan = []
-          }
-
-        } else if (libraryScan.findCovers && libraryItem.media.shouldSearchForCover) { // Search cover
-          libraryScan.resultsUpdated++
-          itemsToFindCovers.push(libraryItem)
-          itemsToUpdate.push(libraryItem)
-        } else if (checkRes.updated) { // Updated but no scan required
-          libraryScan.resultsUpdated++
-          itemsToUpdate.push(libraryItem)
-        }
-        libraryItemDataFound = libraryItemDataFound.filter(lid => lid.ino !== dataFound.ino)
-      }
-    }
-    if (itemDataToRescan.length) itemDataToRescanChunks.push(itemDataToRescan)
-
-    // Potential NEW Library Items
-    for (let i = 0; i < libraryItemDataFound.length; i++) {
-      const dataFound = libraryItemDataFound[i]
-
-      const hasMediaFile = dataFound.libraryFiles.some(lf => lf.isMediaFile)
-      if (!hasMediaFile) {
-        libraryScan.addLog(LogLevel.WARN, `Item found "${libraryItemDataFound.path}" has no media files`)
-      } else {
-        // If this item will go over max size then push current chunk
-        let mediaFileSize = 0
-        dataFound.libraryFiles.filter(lf => lf.fileType === 'audio' || lf.fileType === 'video').forEach(lf => mediaFileSize += lf.metadata.size)
-        if (mediaFileSize + newItemDataToScanSize > MaxSizePerChunk && newItemDataToScan.length > 0) {
-          newItemDataToScanChunks.push(newItemDataToScan)
-          newItemDataToScanSize = 0
-          newItemDataToScan = []
-        }
-
-        newItemDataToScan.push(dataFound)
-        newItemDataToScanSize += mediaFileSize
-
-        if (newItemDataToScanSize >= MaxSizePerChunk) {
-          newItemDataToScanChunks.push(newItemDataToScan)
-          newItemDataToScanSize = 0
-          newItemDataToScan = []
-        }
-      }
-    }
-    if (newItemDataToScan.length) newItemDataToScanChunks.push(newItemDataToScan)
-
-    // Library Items not requiring a scan but require a search for cover
-    for (let i = 0; i < itemsToFindCovers.length; i++) {
-      const libraryItem = itemsToFindCovers[i]
-      const updatedCover = await this.searchForCover(libraryItem, libraryScan)
-      libraryItem.media.updateLastCoverSearch(updatedCover)
-    }
-
-    if (itemsToUpdate.length) {
-      await this.updateLibraryItemChunk(itemsToUpdate)
-      if (this.cancelLibraryScan[libraryScan.libraryId]) return true
-    }
-
-    // Chunking will be removed when legacy single threaded scanner is removed
-    for (let i = 0; i < itemDataToRescanChunks.length; i++) {
-      await this.rescanLibraryItemDataChunk(itemDataToRescanChunks[i], libraryScan)
-      if (this.cancelLibraryScan[libraryScan.libraryId]) return true
-    }
-    for (let i = 0; i < newItemDataToScanChunks.length; i++) {
-      await this.scanNewLibraryItemDataChunk(newItemDataToScanChunks[i], libraryScan)
-      if (this.cancelLibraryScan[libraryScan.libraryId]) return true
-    }
-  }
-
-  async updateLibraryItemChunk(itemsToUpdate) {
-    await this.db.updateLibraryItems(itemsToUpdate)
-    SocketAuthority.emitter('items_updated', itemsToUpdate.map(li => li.toJSONExpanded()))
-  }
-
-  async rescanLibraryItemDataChunk(itemDataToRescan, libraryScan) {
-    var itemsUpdated = await Promise.all(itemDataToRescan.map((lid) => {
-      return this.rescanLibraryItem(lid, libraryScan)
-    }))
-
-    itemsUpdated = itemsUpdated.filter(li => li) // Filter out nulls
-
-    for (const libraryItem of itemsUpdated) {
-      // Temp authors & series are inserted - create them if found
-      await this.createNewAuthorsAndSeries(libraryItem)
-    }
-
-    if (itemsUpdated.length) {
-      libraryScan.resultsUpdated += itemsUpdated.length
-      await this.db.updateLibraryItems(itemsUpdated)
-      SocketAuthority.emitter('items_updated', itemsUpdated.map(li => li.toJSONExpanded()))
-    }
-  }
-
-  async scanNewLibraryItemDataChunk(newLibraryItemsData, libraryScan) {
-    let newLibraryItems = await Promise.all(newLibraryItemsData.map((lid) => {
-      return this.scanNewLibraryItem(lid, libraryScan.libraryMediaType, libraryScan)
-    }))
-    newLibraryItems = newLibraryItems.filter(li => li) // Filter out nulls
-
-    for (const libraryItem of newLibraryItems) {
-      // Temp authors & series are inserted - create them if found
-      await this.createNewAuthorsAndSeries(libraryItem)
-    }
-
-    libraryScan.resultsAdded += newLibraryItems.length
-    await this.db.insertLibraryItems(newLibraryItems)
-    SocketAuthority.emitter('items_added', newLibraryItems.map(li => li.toJSONExpanded()))
-  }
-
-  async rescanLibraryItem(libraryItemCheckData, libraryScan) {
-    const { newLibraryFiles, filesRemoved, existingLibraryFiles, libraryItem, scanData, updated } = libraryItemCheckData
-    libraryScan.addLog(LogLevel.DEBUG, `Library "${libraryScan.libraryName}" Re-scanning "${libraryItem.path}"`)
-    let hasUpdated = updated
-
-    // Sync other files first to use local images as cover before extracting audio file cover
-    if (await libraryItem.syncFiles(libraryScan.preferOpfMetadata)) {
-      hasUpdated = true
-    }
-
-    // forceRescan all existing audio files - will probe and update ID3 tag metadata
-    const existingAudioFiles = existingLibraryFiles.filter(lf => lf.fileType === 'audio')
-    if (libraryScan.scanOptions.forceRescan && existingAudioFiles.length) {
-      if (await MediaFileScanner.scanMediaFiles(existingAudioFiles, libraryItem, libraryScan)) {
-        hasUpdated = true
-      }
-    }
-    // Scan new audio files
-    const newAudioFiles = newLibraryFiles.filter(lf => lf.fileType === 'audio')
-    const removedAudioFiles = filesRemoved.filter(lf => lf.fileType === 'audio')
-    if (newAudioFiles.length || removedAudioFiles.length) {
-      if (await MediaFileScanner.scanMediaFiles(newAudioFiles, libraryItem, libraryScan)) {
-        hasUpdated = true
-      }
-    }
-    // If an audio file has embedded cover art and no cover is set yet, extract & use it
-    if (newAudioFiles.length || libraryScan.scanOptions.forceRescan) {
-      if (libraryItem.media.hasEmbeddedCoverArt && !libraryItem.media.coverPath) {
-        const savedCoverPath = await this.coverManager.saveEmbeddedCoverArt(libraryItem)
-        if (savedCoverPath) {
-          hasUpdated = true
-          libraryScan.addLog(LogLevel.DEBUG, `Saved embedded cover art "${savedCoverPath}"`)
-        }
-      }
-    }
-
-    // Library Item is invalid - (a book has no audio files or ebook files)
-    if (!libraryItem.hasMediaEntities && libraryItem.mediaType !== 'podcast') {
-      libraryItem.setInvalid()
-      hasUpdated = true
-    } else if (libraryItem.isInvalid) {
-      libraryItem.isInvalid = false
-      hasUpdated = true
-    }
-
-    // Scan for cover if enabled and has no cover (and author or title has changed OR has been 7 days since last lookup)
-    if (libraryScan.findCovers && !libraryItem.media.coverPath && libraryItem.media.shouldSearchForCover) {
-      const updatedCover = await this.searchForCover(libraryItem, libraryScan)
-      libraryItem.media.updateLastCoverSearch(updatedCover)
-      hasUpdated = true
-    }
-
-    return hasUpdated ? libraryItem : null
-  }
-
-  async scanNewLibraryItem(libraryItemData, libraryMediaType, libraryScan = null) {
-    if (libraryScan) libraryScan.addLog(LogLevel.DEBUG, `Scanning new library item "${libraryItemData.path}"`)
-    else Logger.debug(`[Scanner] Scanning new item "${libraryItemData.path}"`)
-
-    const preferOpfMetadata = libraryScan ? !!libraryScan.preferOpfMetadata : !!global.ServerSettings.scannerPreferOpfMetadata
-    const findCovers = libraryScan ? !!libraryScan.findCovers : !!global.ServerSettings.scannerFindCovers
-
-    const libraryItem = new LibraryItem()
-    libraryItem.setData(libraryMediaType, libraryItemData)
-
-    const mediaFiles = libraryItemData.libraryFiles.filter(lf => lf.fileType === 'audio' || lf.fileType === 'video')
-    if (mediaFiles.length) {
-      await MediaFileScanner.scanMediaFiles(mediaFiles, libraryItem, libraryScan)
-    }
-
-    await libraryItem.syncFiles(preferOpfMetadata)
-
-    if (!libraryItem.hasMediaEntities) {
-      Logger.warn(`[Scanner] Library item has no media files "${libraryItemData.path}"`)
-      return null
-    }
-
-    // Extract embedded cover art if cover is not already in directory
-    if (libraryItem.media.hasEmbeddedCoverArt && !libraryItem.media.coverPath) {
-      const coverPath = await this.coverManager.saveEmbeddedCoverArt(libraryItem)
-      if (coverPath) {
-        if (libraryScan) libraryScan.addLog(LogLevel.DEBUG, `Saved embedded cover art "${coverPath}"`)
-        else Logger.debug(`[Scanner] Saved embedded cover art "${coverPath}"`)
-      }
-    }
-
-    // Scan for cover if enabled and has no cover
-    if (libraryMediaType === 'book') {
-      if (libraryItem && findCovers && !libraryItem.media.coverPath && libraryItem.media.shouldSearchForCover) {
-        const updatedCover = await this.searchForCover(libraryItem, libraryScan)
-        libraryItem.media.updateLastCoverSearch(updatedCover)
-      }
-    }
-
-    return libraryItem
-  }
-
-  // Any series or author object on library item with an id starting with "new"
-  //   will create a new author/series OR find a matching author/series
-  async createNewAuthorsAndSeries(libraryItem) {
-    if (libraryItem.mediaType !== 'book') return
-
-    // Create or match all new authors and series
-    if (libraryItem.media.metadata.authors.some(au => au.id.startsWith('new'))) {
-      var newAuthors = []
-      libraryItem.media.metadata.authors = libraryItem.media.metadata.authors.map((tempMinAuthor) => {
-        var _author = this.db.authors.find(au => au.checkNameEquals(tempMinAuthor.name))
-        if (!_author) _author = newAuthors.find(au => au.checkNameEquals(tempMinAuthor.name)) // Check new unsaved authors
-        if (!_author) { // Must create new author
-          _author = new Author()
-          _author.setData(tempMinAuthor)
-          newAuthors.push(_author)
-        }
-
-        return {
-          id: _author.id,
-          name: _author.name
-        }
-      })
-      if (newAuthors.length) {
-        await this.db.insertEntities('author', newAuthors)
-        SocketAuthority.emitter('authors_added', newAuthors.map(au => au.toJSON()))
-      }
-    }
-    if (libraryItem.media.metadata.series.some(se => se.id.startsWith('new'))) {
-      var newSeries = []
-      libraryItem.media.metadata.series = libraryItem.media.metadata.series.map((tempMinSeries) => {
-        var _series = this.db.series.find(se => se.checkNameEquals(tempMinSeries.name))
-        if (!_series) _series = newSeries.find(se => se.checkNameEquals(tempMinSeries.name)) // Check new unsaved series
-        if (!_series) { // Must create new series
-          _series = new Series()
-          _series.setData(tempMinSeries)
-          newSeries.push(_series)
-        }
-        return {
-          id: _series.id,
-          name: _series.name,
-          sequence: tempMinSeries.sequence
-        }
-      })
-      if (newSeries.length) {
-        await this.db.insertEntities('series', newSeries)
-        SocketAuthority.emitter('multiple_series_added', newSeries.map(se => se.toJSON()))
-      }
-    }
-  }
-
-  getFileUpdatesGrouped(fileUpdates) {
-    var folderGroups = {}
-    fileUpdates.forEach((file) => {
-      if (folderGroups[file.folderId]) {
-        folderGroups[file.folderId].fileUpdates.push(file)
-      } else {
-        folderGroups[file.folderId] = {
-          libraryId: file.libraryId,
-          folderId: file.folderId,
-          fileUpdates: [file]
-        }
-      }
-    })
-    return folderGroups
-  }
-
-  async scanFilesChanged(fileUpdates) {
-    if (!fileUpdates || !fileUpdates.length) return
-
-    // If already scanning files from watcher then add these updates to queue
-    if (this.scanningFilesChanged) {
-      this.pendingFileUpdatesToScan.push(fileUpdates)
-      Logger.debug(`[Scanner] Already scanning files from watcher - file updates pushed to queue (size ${this.pendingFileUpdatesToScan.length})`)
-      return
-    }
-    this.scanningFilesChanged = true
-
-    // files grouped by folder
-    var folderGroups = this.getFileUpdatesGrouped(fileUpdates)
-
-    for (const folderId in folderGroups) {
-      var libraryId = folderGroups[folderId].libraryId
-      var library = this.db.libraries.find(lib => lib.id === libraryId)
-      if (!library) {
-        Logger.error(`[Scanner] Library not found in files changed ${libraryId}`)
-        continue;
-      }
-      var folder = library.getFolderById(folderId)
-      if (!folder) {
-        Logger.error(`[Scanner] Folder is not in library in files changed "${folderId}", Library "${library.name}"`)
-        continue;
-      }
-      var relFilePaths = folderGroups[folderId].fileUpdates.map(fileUpdate => fileUpdate.relPath)
-      var fileUpdateGroup = groupFilesIntoLibraryItemPaths(library.mediaType, relFilePaths)
-
-      if (!Object.keys(fileUpdateGroup).length) {
-        Logger.info(`[Scanner] No important changes to scan for in folder "${folderId}"`)
-        continue;
-      }
-      var folderScanResults = await this.scanFolderUpdates(library, folder, fileUpdateGroup)
-      Logger.debug(`[Scanner] Folder scan results`, folderScanResults)
-    }
-
-    this.scanningFilesChanged = false
-
-    if (this.pendingFileUpdatesToScan.length) {
-      Logger.debug(`[Scanner] File updates finished scanning with more updates in queue (${this.pendingFileUpdatesToScan.length})`)
-      this.scanFilesChanged(this.pendingFileUpdatesToScan.shift())
-    }
-  }
-
-  async scanFolderUpdates(library, folder, fileUpdateGroup) {
-    Logger.debug(`[Scanner] Scanning file update groups in folder "${folder.id}" of library "${library.name}"`)
-    Logger.debug(`[Scanner] scanFolderUpdates fileUpdateGroup`, fileUpdateGroup)
-
-    // First pass - Remove files in parent dirs of items and remap the fileupdate group
-    //    Test Case: Moving audio files from library item folder to author folder should trigger a re-scan of the item
-    var updateGroup = { ...fileUpdateGroup }
-    for (const itemDir in updateGroup) {
-      if (itemDir == fileUpdateGroup[itemDir]) continue; // Media in root path
-
-      var itemDirNestedFiles = fileUpdateGroup[itemDir].filter(b => b.includes('/'))
-      if (!itemDirNestedFiles.length) continue;
-
-      var firstNest = itemDirNestedFiles[0].split('/').shift()
-      var altDir = `${itemDir}/${firstNest}`
-
-      var fullPath = Path.posix.join(filePathToPOSIX(folder.fullPath), itemDir)
-      var childLibraryItem = this.db.libraryItems.find(li => li.path !== fullPath && li.path.startsWith(fullPath))
-      if (!childLibraryItem) {
-        continue;
-      }
-      var altFullPath = Path.posix.join(filePathToPOSIX(folder.fullPath), altDir)
-      var altChildLibraryItem = this.db.libraryItems.find(li => li.path !== altFullPath && li.path.startsWith(altFullPath))
-      if (altChildLibraryItem) {
-        continue;
-      }
-
-      delete fileUpdateGroup[itemDir]
-      fileUpdateGroup[altDir] = itemDirNestedFiles.map((f) => f.split('/').slice(1).join('/'))
-      Logger.warn(`[Scanner] Some files were modified in a parent directory of a library item "${childLibraryItem.title}" - ignoring`)
-    }
-
-    // Second pass: Check for new/updated/removed items
-    const itemGroupingResults = {}
-    for (const itemDir in fileUpdateGroup) {
-      const fullPath = Path.posix.join(filePathToPOSIX(folder.fullPath), itemDir)
-      const dirIno = await getIno(fullPath)
-
-      // Check if book dir group is already an item
-      let existingLibraryItem = this.db.libraryItems.find(li => fullPath.startsWith(li.path))
-      if (!existingLibraryItem) {
-        existingLibraryItem = this.db.libraryItems.find(li => li.ino === dirIno)
-        if (existingLibraryItem) {
-          Logger.debug(`[Scanner] scanFolderUpdates: Library item found by inode value=${dirIno}. "${existingLibraryItem.relPath} => ${itemDir}"`)
-          // Update library item paths for scan and all library item paths will get updated in LibraryItem.checkScanData
-          existingLibraryItem.path = fullPath
-          existingLibraryItem.relPath = itemDir
-        }
-      }
-      if (existingLibraryItem) {
-        // Is the item exactly - check if was deleted
-        if (existingLibraryItem.path === fullPath) {
-          const exists = await fs.pathExists(fullPath)
-          if (!exists) {
-            Logger.info(`[Scanner] Scanning file update group and library item was deleted "${existingLibraryItem.media.metadata.title}" - marking as missing`)
-            existingLibraryItem.setMissing()
-            await this.db.updateLibraryItem(existingLibraryItem)
-            SocketAuthority.emitter('item_updated', existingLibraryItem.toJSONExpanded())
-
-            itemGroupingResults[itemDir] = ScanResult.REMOVED
-            continue;
-          }
-        }
-
-        // Scan library item for updates
-        Logger.debug(`[Scanner] Folder update for relative path "${itemDir}" is in library item "${existingLibraryItem.media.metadata.title}" - scan for updates`)
-        itemGroupingResults[itemDir] = await this.scanLibraryItem(library.mediaType, folder, existingLibraryItem)
-        continue;
-      }
-
-      // Check if a library item is a subdirectory of this dir
-      var childItem = this.db.libraryItems.find(li => (li.path + '/').startsWith(fullPath + '/'))
-      if (childItem) {
-        Logger.warn(`[Scanner] Files were modified in a parent directory of a library item "${childItem.media.metadata.title}" - ignoring`)
-        itemGroupingResults[itemDir] = ScanResult.NOTHING
-        continue;
-      }
-
-      Logger.debug(`[Scanner] Folder update group must be a new item "${itemDir}" in library "${library.name}"`)
-      var isSingleMediaItem = itemDir === fileUpdateGroup[itemDir]
-      var newLibraryItem = await this.scanPotentialNewLibraryItem(library.mediaType, folder, fullPath, isSingleMediaItem)
-      if (newLibraryItem) {
-        await this.createNewAuthorsAndSeries(newLibraryItem)
-        await this.db.insertLibraryItem(newLibraryItem)
-        SocketAuthority.emitter('item_added', newLibraryItem.toJSONExpanded())
-      }
-      itemGroupingResults[itemDir] = newLibraryItem ? ScanResult.ADDED : ScanResult.NOTHING
-    }
-
-    return itemGroupingResults
-  }
-
-  async scanPotentialNewLibraryItem(libraryMediaType, folder, fullPath, isSingleMediaItem = false) {
-    const libraryItemData = await getLibraryItemFileData(libraryMediaType, folder, fullPath, isSingleMediaItem, this.db.serverSettings)
-    if (!libraryItemData) return null
-    return this.scanNewLibraryItem(libraryItemData, libraryMediaType)
-  }
-
-  async searchForCover(libraryItem, libraryScan = null) {
-    const options = {
-      titleDistance: 2,
-      authorDistance: 2
-    }
-    const scannerCoverProvider = this.db.serverSettings.scannerCoverProvider
-    const results = await this.bookFinder.findCovers(scannerCoverProvider, libraryItem.media.metadata.title, libraryItem.media.metadata.authorName, options)
-    if (results.length) {
-      if (libraryScan) libraryScan.addLog(LogLevel.DEBUG, `Found best cover for "${libraryItem.media.metadata.title}"`)
-      else Logger.debug(`[Scanner] Found best cover for "${libraryItem.media.metadata.title}"`)
-
-      // If the first cover result fails, attempt to download the second
-      for (let i = 0; i < results.length && i < 2; i++) {
-
-        // Downloads and updates the book cover
-        const result = await this.coverManager.downloadCoverFromUrl(libraryItem, results[i])
-
-        if (result.error) {
-          Logger.error(`[Scanner] Failed to download cover from url "${results[i]}" | Attempt ${i + 1}`, result.error)
-        } else {
-          return true
-        }
-      }
-    }
-    return false
-  }
-
-  async quickMatchLibraryItem(libraryItem, options = {}) {
-    var provider = options.provider || 'google'
-    var searchTitle = options.title || libraryItem.media.metadata.title
-    var searchAuthor = options.author || libraryItem.media.metadata.authorName
-    var overrideDefaults = options.overrideDefaults || false
-
-    // Set to override existing metadata if scannerPreferMatchedMetadata setting is true and 
-    // the overrideDefaults option is not set or set to false.
-    if ((overrideDefaults == false) && (this.db.serverSettings.scannerPreferMatchedMetadata)) {
+  constructor() {}
+
+  /**
+   *
+   * @param {import('../routers/ApiRouter')} apiRouterCtx
+   * @param {import('../models/LibraryItem')} libraryItem
+   * @param {QuickMatchOptions} options
+   * @returns {Promise<{updated: boolean, libraryItem: Object}>}
+   */
+  async quickMatchLibraryItem(apiRouterCtx, libraryItem, options = {}) {
+    const provider = options.provider || 'google'
+    const searchTitle = options.title || libraryItem.media.title
+    const searchAuthor = options.author || libraryItem.media.authorName
+
+    // If overrideCover and overrideDetails is not sent in options than use the server setting to determine if we should override
+    if (options.overrideCover === undefined && options.overrideDetails === undefined && Database.serverSettings.scannerPreferMatchedMetadata) {
       options.overrideCover = true
       options.overrideDetails = true
     }
 
-    var updatePayload = {}
-    var hasUpdated = false
+    let updatePayload = {}
+    let hasUpdated = false
+
+    let existingAuthors = [] // Used for checking if authors or series are now empty
+    let existingSeries = []
 
     if (libraryItem.isBook) {
-      var searchISBN = options.isbn || libraryItem.media.metadata.isbn
-      var searchASIN = options.asin || libraryItem.media.metadata.asin
+      existingAuthors = libraryItem.media.authors.map((a) => a.id)
+      existingSeries = libraryItem.media.series.map((s) => s.id)
 
-      var results = await this.bookFinder.search(provider, searchTitle, searchAuthor, searchISBN, searchASIN)
+      const searchISBN = options.isbn || libraryItem.media.isbn
+      const searchASIN = options.asin || libraryItem.media.asin
+
+      const results = await BookFinder.search(libraryItem, provider, searchTitle, searchAuthor, searchISBN, searchASIN, { maxFuzzySearches: 2 })
       if (!results.length) {
         return {
           warning: `No ${provider} match found`
         }
       }
-      var matchData = results[0]
+      const matchData = results[0]
 
       // Update cover if not set OR overrideCover flag
       if (matchData.cover && (!libraryItem.media.coverPath || options.overrideCover)) {
         Logger.debug(`[Scanner] Updating cover "${matchData.cover}"`)
-        var coverResult = await this.coverManager.downloadCoverFromUrl(libraryItem, matchData.cover)
-        if (!coverResult || coverResult.error || !coverResult.cover) {
-          Logger.warn(`[Scanner] Match cover "${matchData.cover}" failed to use: ${coverResult ? coverResult.error : 'Unknown Error'}`)
+        const coverResult = await CoverManager.downloadCoverFromUrlNew(matchData.cover, libraryItem.id, libraryItem.isFile ? null : libraryItem.path)
+        if (coverResult.error) {
+          Logger.warn(`[Scanner] Match cover "${matchData.cover}" failed to use: ${coverResult.error}`)
         } else {
+          libraryItem.media.coverPath = coverResult.cover
+          libraryItem.media.changed('coverPath', true) // Cover path may be the same but this forces the update
           hasUpdated = true
         }
       }
 
-      updatePayload = await this.quickMatchBookBuildUpdatePayload(libraryItem, matchData, options)
-    } else if (libraryItem.isPodcast) { // Podcast quick match
-      var results = await this.podcastFinder.search(searchTitle)
+      const bookBuildUpdateData = await this.quickMatchBookBuildUpdatePayload(apiRouterCtx, libraryItem, matchData, options)
+      updatePayload = bookBuildUpdateData.updatePayload
+      if (bookBuildUpdateData.hasSeriesUpdates || bookBuildUpdateData.hasAuthorUpdates) {
+        hasUpdated = true
+      }
+    } else if (libraryItem.isPodcast) {
+      // Podcast quick match
+      const results = await PodcastFinder.search(searchTitle)
       if (!results.length) {
         return {
           warning: `No ${provider} match found`
         }
       }
-      var matchData = results[0]
+      const matchData = results[0]
 
       // Update cover if not set OR overrideCover flag
       if (matchData.cover && (!libraryItem.media.coverPath || options.overrideCover)) {
         Logger.debug(`[Scanner] Updating cover "${matchData.cover}"`)
-        var coverResult = await this.coverManager.downloadCoverFromUrl(libraryItem, matchData.cover)
-        if (!coverResult || coverResult.error || !coverResult.cover) {
-          Logger.warn(`[Scanner] Match cover "${matchData.cover}" failed to use: ${coverResult ? coverResult.error : 'Unknown Error'}`)
+        const coverResult = await CoverManager.downloadCoverFromUrlNew(matchData.cover, libraryItem.id, libraryItem.path)
+        if (coverResult.error) {
+          Logger.warn(`[Scanner] Match cover "${matchData.cover}" failed to use: ${coverResult.error}`)
         } else {
+          libraryItem.media.coverPath = coverResult.cover
+          libraryItem.media.changed('coverPath', true) // Cover path may be the same but this forces the update
           hasUpdated = true
         }
       }
@@ -728,30 +111,45 @@ class Scanner {
     }
 
     if (Object.keys(updatePayload).length) {
-      Logger.debug('[Scanner] Updating details', updatePayload)
-      if (libraryItem.media.update(updatePayload)) {
+      Logger.debug('[Scanner] Updating details with payload', updatePayload)
+      libraryItem.media.set(updatePayload)
+      if (libraryItem.media.changed()) {
+        Logger.debug(`[Scanner] Updating library item "${libraryItem.media.title}" keys`, libraryItem.media.changed())
         hasUpdated = true
       }
     }
 
     if (hasUpdated) {
-      if (libraryItem.isPodcast && libraryItem.media.metadata.feedUrl) { // Quick match all unmatched podcast episodes
+      if (libraryItem.isPodcast && libraryItem.media.feedURL) {
+        // Quick match all unmatched podcast episodes
         await this.quickMatchPodcastEpisodes(libraryItem, options)
       }
 
-      await this.db.updateLibraryItem(libraryItem)
-      SocketAuthority.emitter('item_updated', libraryItem.toJSONExpanded())
+      await libraryItem.media.save()
+
+      libraryItem.changed('updatedAt', true)
+      await libraryItem.save()
+
+      await libraryItem.saveMetadataFile()
+
+      SocketAuthority.emitter('item_updated', libraryItem.toOldJSONExpanded())
     }
 
     return {
       updated: hasUpdated,
-      libraryItem: libraryItem.toJSONExpanded()
+      libraryItem: libraryItem.toOldJSONExpanded()
     }
   }
 
+  /**
+   *
+   * @param {import('../models/LibraryItem')} libraryItem
+   * @param {*} matchData
+   * @param {QuickMatchOptions} options
+   * @returns {Map<string, any>} - Update payload
+   */
   quickMatchPodcastBuildUpdatePayload(libraryItem, matchData, options) {
     const updatePayload = {}
-    updatePayload.metadata = {}
 
     const matchDataTransformed = {
       title: matchData.title || null,
@@ -769,136 +167,243 @@ class Scanner {
     for (const key in matchDataTransformed) {
       if (matchDataTransformed[key]) {
         if (key === 'genres') {
-          if ((!libraryItem.media.metadata.genres.length || options.overrideDetails)) {
+          if (!libraryItem.media.genres.length || options.overrideDetails) {
             var genresArray = []
             if (Array.isArray(matchDataTransformed[key])) genresArray = [...matchDataTransformed[key]]
-            else { // Genres should always be passed in as an array but just incase handle a string
+            else {
+              // Genres should always be passed in as an array but just incase handle a string
               Logger.warn(`[Scanner] quickMatch genres is not an array ${matchDataTransformed[key]}`)
-              genresArray = matchDataTransformed[key].split(',').map(v => v.trim()).filter(v => !!v)
+              genresArray = matchDataTransformed[key]
+                .split(',')
+                .map((v) => v.trim())
+                .filter((v) => !!v)
             }
-            updatePayload.metadata[key] = genresArray
+            updatePayload[key] = genresArray
           }
-        } else if (libraryItem.media.metadata[key] !== matchDataTransformed[key] && (!libraryItem.media.metadata[key] || options.overrideDetails)) {
-          updatePayload.metadata[key] = matchDataTransformed[key]
+        } else if (libraryItem.media[key] !== matchDataTransformed[key] && (!libraryItem.media[key] || options.overrideDetails)) {
+          updatePayload[key] = matchDataTransformed[key]
         }
       }
-    }
-
-    if (!Object.keys(updatePayload.metadata).length) {
-      delete updatePayload.metadata
     }
 
     return updatePayload
   }
 
-  async quickMatchBookBuildUpdatePayload(libraryItem, matchData, options) {
+  /**
+   *
+   * @param {import('../routers/ApiRouter')} apiRouterCtx
+   * @param {import('../models/LibraryItem')} libraryItem
+   * @param {*} matchData
+   * @param {QuickMatchOptions} options
+   * @returns {Promise<{updatePayload: Map<string, any>, seriesIdsRemoved: string[], hasSeriesUpdates: boolean, authorIdsRemoved: string[], hasAuthorUpdates: boolean}>}
+   */
+  async quickMatchBookBuildUpdatePayload(apiRouterCtx, libraryItem, matchData, options) {
     // Update media metadata if not set OR overrideDetails flag
     const detailKeysToUpdate = ['title', 'subtitle', 'description', 'narrator', 'publisher', 'publishedYear', 'genres', 'tags', 'language', 'explicit', 'abridged', 'asin', 'isbn']
     const updatePayload = {}
-    updatePayload.metadata = {}
 
     for (const key in matchData) {
       if (matchData[key] && detailKeysToUpdate.includes(key)) {
         if (key === 'narrator') {
-          if ((!libraryItem.media.metadata.narratorName || options.overrideDetails)) {
-            updatePayload.metadata.narrators = matchData[key].split(',').map(v => v.trim()).filter(v => !!v)
+          if (!libraryItem.media.narrators?.length || options.overrideDetails) {
+            updatePayload.narrators = matchData[key]
+              .split(',')
+              .map((v) => v.trim())
+              .filter((v) => !!v)
           }
         } else if (key === 'genres') {
-          if ((!libraryItem.media.metadata.genres.length || options.overrideDetails)) {
-            var genresArray = []
+          if (!libraryItem.media.genres.length || options.overrideDetails) {
+            let genresArray = []
             if (Array.isArray(matchData[key])) genresArray = [...matchData[key]]
-            else { // Genres should always be passed in as an array but just incase handle a string
+            else {
+              // Genres should always be passed in as an array but just incase handle a string
               Logger.warn(`[Scanner] quickMatch genres is not an array ${matchData[key]}`)
-              genresArray = matchData[key].split(',').map(v => v.trim()).filter(v => !!v)
+              genresArray = matchData[key]
+                .split(',')
+                .map((v) => v.trim())
+                .filter((v) => !!v)
             }
-            updatePayload.metadata[key] = genresArray
+            updatePayload[key] = genresArray
           }
         } else if (key === 'tags') {
-          if ((!libraryItem.media.tags.length || options.overrideDetails)) {
-            var tagsArray = []
+          if (!libraryItem.media.tags.length || options.overrideDetails) {
+            let tagsArray = []
             if (Array.isArray(matchData[key])) tagsArray = [...matchData[key]]
-            else tagsArray = matchData[key].split(',').map(v => v.trim()).filter(v => !!v)
+            else
+              tagsArray = matchData[key]
+                .split(',')
+                .map((v) => v.trim())
+                .filter((v) => !!v)
             updatePayload[key] = tagsArray
           }
-        } else if ((!libraryItem.media.metadata[key] || options.overrideDetails)) {
-          updatePayload.metadata[key] = matchData[key]
+        } else if (!libraryItem.media[key] || options.overrideDetails) {
+          updatePayload[key] = matchData[key]
         }
       }
     }
 
     // Add or set author if not set
-    if (matchData.author && (!libraryItem.media.metadata.authorName || options.overrideDetails)) {
+    let hasAuthorUpdates = false
+    if (matchData.author && (!libraryItem.media.authorName || options.overrideDetails)) {
       if (!Array.isArray(matchData.author)) {
-        matchData.author = matchData.author.split(',').map(au => au.trim()).filter(au => !!au)
+        matchData.author = matchData.author
+          .split(',')
+          .map((au) => au.trim())
+          .filter((au) => !!au)
       }
-      const authorPayload = []
-      for (let index = 0; index < matchData.author.length; index++) {
-        const authorName = matchData.author[index]
-        var author = this.db.authors.find(au => au.checkNameEquals(authorName))
-        if (!author) {
-          author = new Author()
-          author.setData({ name: authorName })
-          await this.db.insertEntity('author', author)
-          SocketAuthority.emitter('author_added', author.toJSON())
+      const authorIdsRemoved = []
+      for (const authorName of matchData.author) {
+        const existingAuthor = libraryItem.media.authors.find((a) => a.name.toLowerCase() === authorName.toLowerCase())
+        if (!existingAuthor) {
+          let author = await Database.authorModel.getByNameAndLibrary(authorName, libraryItem.libraryId)
+          if (!author) {
+            author = await Database.authorModel.create({
+              name: authorName,
+              lastFirst: Database.authorModel.getLastFirst(authorName),
+              libraryId: libraryItem.libraryId
+            })
+            SocketAuthority.emitter('author_added', author.toOldJSON())
+            // Update filter data
+            Database.addAuthorToFilterData(libraryItem.libraryId, author.name, author.id)
+
+            await Database.bookAuthorModel
+              .create({
+                authorId: author.id,
+                bookId: libraryItem.media.id
+              })
+              .then(() => {
+                Logger.info(`[Scanner] quickMatchBookBuildUpdatePayload: Added author "${author.name}" to "${libraryItem.media.title}"`)
+                libraryItem.media.authors.push(author)
+                hasAuthorUpdates = true
+              })
+          }
         }
-        authorPayload.push(author.toJSONMinimal())
+        const authorsRemoved = libraryItem.media.authors.filter((a) => !matchData.author.find((ma) => ma.toLowerCase() === a.name.toLowerCase()))
+        if (authorsRemoved.length) {
+          for (const author of authorsRemoved) {
+            await Database.bookAuthorModel.destroy({ where: { authorId: author.id, bookId: libraryItem.media.id } })
+            libraryItem.media.authors = libraryItem.media.authors.filter((a) => a.id !== author.id)
+            authorIdsRemoved.push(author.id)
+            Logger.info(`[Scanner] quickMatchBookBuildUpdatePayload: Removed author "${author.name}" from "${libraryItem.media.title}"`)
+          }
+          hasAuthorUpdates = true
+        }
       }
-      updatePayload.metadata.authors = authorPayload
+
+      // For all authors removed from book, check if they are empty now and should be removed
+      if (authorIdsRemoved.length) {
+        await apiRouterCtx.checkRemoveAuthorsWithNoBooks(authorIdsRemoved)
+      }
     }
 
     // Add or set series if not set
-    if (matchData.series && (!libraryItem.media.metadata.seriesName || options.overrideDetails)) {
+    let hasSeriesUpdates = false
+    if (matchData.series && (!libraryItem.media.seriesName || options.overrideDetails)) {
       if (!Array.isArray(matchData.series)) matchData.series = [{ series: matchData.series, sequence: matchData.sequence }]
-      const seriesPayload = []
-      for (let index = 0; index < matchData.series.length; index++) {
-        const seriesMatchItem = matchData.series[index]
-        var seriesItem = this.db.series.find(au => au.checkNameEquals(seriesMatchItem.series))
-        if (!seriesItem) {
-          seriesItem = new Series()
-          seriesItem.setData({ name: seriesMatchItem.series })
-          await this.db.insertEntity('series', seriesItem)
-          SocketAuthority.emitter('series_added', seriesItem.toJSON())
+      const seriesIdsRemoved = []
+      for (const seriesMatchItem of matchData.series) {
+        const existingSeries = libraryItem.media.series.find((s) => s.name.toLowerCase() === seriesMatchItem.series.toLowerCase())
+        if (existingSeries) {
+          if (existingSeries.bookSeries.sequence !== seriesMatchItem.sequence) {
+            existingSeries.bookSeries.sequence = seriesMatchItem.sequence
+            await existingSeries.bookSeries.save()
+            Logger.info(`[Scanner] quickMatchBookBuildUpdatePayload: Updated series sequence for "${existingSeries.name}" to ${seriesMatchItem.sequence} in "${libraryItem.media.title}"`)
+            hasSeriesUpdates = true
+          }
+        } else {
+          let seriesItem = await Database.seriesModel.getByNameAndLibrary(seriesMatchItem.series, libraryItem.libraryId)
+          if (!seriesItem) {
+            seriesItem = await Database.seriesModel.create({
+              name: seriesMatchItem.series,
+              nameIgnorePrefix: getTitleIgnorePrefix(seriesMatchItem.series),
+              libraryId: libraryItem.libraryId
+            })
+            // Update filter data
+            Database.addSeriesToFilterData(libraryItem.libraryId, seriesItem.name, seriesItem.id)
+            SocketAuthority.emitter('series_added', seriesItem.toOldJSON())
+          }
+          const bookSeries = await Database.bookSeriesModel.create({
+            seriesId: seriesItem.id,
+            bookId: libraryItem.media.id,
+            sequence: seriesMatchItem.sequence
+          })
+          seriesItem.bookSeries = bookSeries
+          libraryItem.media.series.push(seriesItem)
+          Logger.info(`[Scanner] quickMatchBookBuildUpdatePayload: Added series "${seriesItem.name}" to "${libraryItem.media.title}"`)
+          hasSeriesUpdates = true
         }
-        seriesPayload.push(seriesItem.toJSONMinimal(seriesMatchItem.sequence))
+        const seriesRemoved = libraryItem.media.series.filter((s) => !matchData.series.find((ms) => ms.series.toLowerCase() === s.name.toLowerCase()))
+        if (seriesRemoved.length) {
+          for (const series of seriesRemoved) {
+            await series.bookSeries.destroy()
+            libraryItem.media.series = libraryItem.media.series.filter((s) => s.id !== series.id)
+            seriesIdsRemoved.push(series.id)
+            Logger.info(`[Scanner] quickMatchBookBuildUpdatePayload: Removed series "${series.name}" from "${libraryItem.media.title}"`)
+          }
+          hasSeriesUpdates = true
+        }
       }
-      updatePayload.metadata.series = seriesPayload
+
+      // For all series removed from book, check if it is empty now and should be removed
+      if (seriesIdsRemoved.length) {
+        await apiRouterCtx.checkRemoveEmptySeries(seriesIdsRemoved)
+      }
     }
 
-    if (!Object.keys(updatePayload.metadata).length) {
-      delete updatePayload.metadata
+    return {
+      updatePayload,
+      hasSeriesUpdates,
+      hasAuthorUpdates
     }
-
-    return updatePayload
   }
 
+  /**
+   *
+   * @param {import('../models/LibraryItem')} libraryItem
+   * @param {QuickMatchOptions} options
+   * @returns {Promise<number>} - Number of episodes updated
+   */
   async quickMatchPodcastEpisodes(libraryItem, options = {}) {
-    const episodesToQuickMatch = libraryItem.media.episodes.filter(ep => !ep.enclosureUrl) // Only quick match episodes without enclosure
-    if (!episodesToQuickMatch.length) return false
+    /** @type {import('../models/PodcastEpisode')[]} */
+    const episodesToQuickMatch = libraryItem.media.podcastEpisodes.filter((ep) => !ep.enclosureURL) // Only quick match episodes that are not already matched
+    if (!episodesToQuickMatch.length) return 0
 
-    const feed = await getPodcastFeed(libraryItem.media.metadata.feedUrl)
+    const feed = await getPodcastFeed(libraryItem.media.feedURL)
     if (!feed) {
-      Logger.error(`[Scanner] quickMatchPodcastEpisodes: Unable to quick match episodes feed not found for "${libraryItem.media.metadata.feedUrl}"`)
-      return false
+      Logger.error(`[Scanner] quickMatchPodcastEpisodes: Unable to quick match episodes feed not found for "${libraryItem.media.feedURL}"`)
+      return 0
     }
 
     let numEpisodesUpdated = 0
     for (const episode of episodesToQuickMatch) {
       const episodeMatches = findMatchingEpisodesInFeed(feed, episode.title)
-      if (episodeMatches && episodeMatches.length) {
-        const wasUpdated = this.updateEpisodeWithMatch(libraryItem, episode, episodeMatches[0].episode, options)
+      if (episodeMatches?.length) {
+        const wasUpdated = await this.updateEpisodeWithMatch(episode, episodeMatches[0].episode, options)
         if (wasUpdated) numEpisodesUpdated++
       }
+    }
+    if (numEpisodesUpdated) {
+      Logger.info(`[Scanner] quickMatchPodcastEpisodes: Updated ${numEpisodesUpdated} episodes for "${libraryItem.media.title}"`)
     }
     return numEpisodesUpdated
   }
 
-  updateEpisodeWithMatch(libraryItem, episode, episodeToMatch, options = {}) {
+  /**
+   *
+   * @param {import('../models/PodcastEpisode')} episode
+   * @param {import('../utils/podcastUtils').RssPodcastEpisode} episodeToMatch
+   * @param {QuickMatchOptions} options
+   * @returns {Promise<boolean>} - true if episode was updated
+   */
+  async updateEpisodeWithMatch(episode, episodeToMatch, options = {}) {
     Logger.debug(`[Scanner] quickMatchPodcastEpisodes: Found episode match for "${episode.title}" => ${episodeToMatch.title}`)
     const matchDataTransformed = {
       title: episodeToMatch.title || '',
       subtitle: episodeToMatch.subtitle || '',
       description: episodeToMatch.description || '',
-      enclosure: episodeToMatch.enclosure || null,
+      enclosureURL: episodeToMatch.enclosure?.url || null,
+      enclosureSize: episodeToMatch.enclosure?.length || null,
+      enclosureType: episodeToMatch.enclosure?.type || null,
       episode: episodeToMatch.episode || '',
       episodeType: episodeToMatch.episodeType || 'full',
       season: episodeToMatch.season || '',
@@ -908,90 +413,141 @@ class Scanner {
     const updatePayload = {}
     for (const key in matchDataTransformed) {
       if (matchDataTransformed[key]) {
-        if (key === 'enclosure') {
-          if (!episode.enclosure || JSON.stringify(episode.enclosure) !== JSON.stringify(matchDataTransformed.enclosure)) {
-            updatePayload[key] = {
-              ...matchDataTransformed.enclosure
-            }
-          }
-        } else if (episode[key] !== matchDataTransformed[key] && (!episode[key] || options.overrideDetails)) {
+        if (episode[key] !== matchDataTransformed[key] && (!episode[key] || options.overrideDetails)) {
           updatePayload[key] = matchDataTransformed[key]
         }
       }
     }
 
     if (Object.keys(updatePayload).length) {
-      return libraryItem.media.updateEpisode(episode.id, updatePayload)
+      episode.set(updatePayload)
+      if (episode.changed()) {
+        Logger.debug(`[Scanner] quickMatchPodcastEpisodes: Updating episode "${episode.title}" keys`, episode.changed())
+        await episode.save()
+        return true
+      }
     }
     return false
   }
 
-  async matchLibraryItems(library) {
+  /**
+   * Quick match library items
+   *
+   * @param {import('../routers/ApiRouter')} apiRouterCtx
+   * @param {import('../models/Library')} library
+   * @param {import('../models/LibraryItem')[]} libraryItems
+   * @param {LibraryScan} libraryScan
+   * @returns {Promise<boolean>} false if scan canceled
+   */
+  async matchLibraryItemsChunk(apiRouterCtx, library, libraryItems, libraryScan) {
+    for (let i = 0; i < libraryItems.length; i++) {
+      const libraryItem = libraryItems[i]
+
+      if (libraryItem.media.asin && library.settings.skipMatchingMediaWithAsin) {
+        Logger.debug(`[Scanner] matchLibraryItems: Skipping "${libraryItem.media.title}" because it already has an ASIN (${i + 1} of ${libraryItems.length})`)
+        continue
+      }
+
+      if (libraryItem.media.isbn && library.settings.skipMatchingMediaWithIsbn) {
+        Logger.debug(`[Scanner] matchLibraryItems: Skipping "${libraryItem.media.title}" because it already has an ISBN (${i + 1} of ${libraryItems.length})`)
+        continue
+      }
+
+      Logger.debug(`[Scanner] matchLibraryItems: Quick matching "${libraryItem.media.title}" (${i + 1} of ${libraryItems.length})`)
+      const result = await this.quickMatchLibraryItem(apiRouterCtx, libraryItem, { provider: library.provider })
+      if (result.warning) {
+        Logger.warn(`[Scanner] matchLibraryItems: Match warning ${result.warning} for library item "${libraryItem.media.title}"`)
+      } else if (result.updated) {
+        libraryScan.resultsUpdated++
+      }
+
+      if (LibraryScanner.cancelLibraryScan[libraryScan.libraryId]) {
+        Logger.info(`[Scanner] matchLibraryItems: Library match scan canceled for "${libraryScan.libraryName}"`)
+        return false
+      }
+    }
+
+    return true
+  }
+
+  /**
+   * Quick match all library items for library
+   *
+   * @param {import('../routers/ApiRouter')} apiRouterCtx
+   * @param {import('../models/Library')} library
+   */
+  async matchLibraryItems(apiRouterCtx, library) {
     if (library.mediaType === 'podcast') {
       Logger.error(`[Scanner] matchLibraryItems: Match all not supported for podcasts yet`)
       return
     }
 
-    if (this.isLibraryScanning(library.id)) {
-      Logger.error(`[Scanner] matchLibraryItems: Already scanning ${library.id}`)
+    if (LibraryScanner.isLibraryScanning(library.id)) {
+      Logger.error(`[Scanner] Library "${library.name}" is already scanning`)
       return
     }
 
-    var itemsInLibrary = this.db.getLibraryItemsInLibrary(library.id)
-    if (!itemsInLibrary.length) {
-      Logger.error(`[Scanner] matchLibraryItems: Library has no items ${library.id}`)
-      return
+    const limit = 100
+    let offset = 0
+
+    const libraryScan = new LibraryScan()
+    libraryScan.setData(library, 'match')
+    LibraryScanner.librariesScanning.push(libraryScan.libraryId)
+    const taskData = {
+      libraryId: library.id
     }
-
-    const provider = library.provider
-
-    var libraryScan = new LibraryScan()
-    libraryScan.setData(library, null, 'match')
-    this.librariesScanning.push(libraryScan.getScanEmitData)
-    SocketAuthority.emitter('scan_start', libraryScan.getScanEmitData)
-
+    const taskTitleString = {
+      text: `Matching books in "${library.name}"`,
+      key: 'MessageTaskMatchingBooksInLibrary',
+      subs: [library.name]
+    }
+    const task = TaskManager.createAndAddTask('library-match-all', taskTitleString, null, true, taskData)
     Logger.info(`[Scanner] matchLibraryItems: Starting library match scan ${libraryScan.id} for ${libraryScan.libraryName}`)
 
-    for (let i = 0; i < itemsInLibrary.length; i++) {
-      var libraryItem = itemsInLibrary[i]
-
-      if (libraryItem.media.metadata.asin && library.settings.skipMatchingMediaWithAsin) {
-        Logger.debug(`[Scanner] matchLibraryItems: Skipping "${libraryItem.media.metadata.title
-          }" because it already has an ASIN (${i + 1} of ${itemsInLibrary.length})`)
-        continue;
+    let hasMoreChunks = true
+    let isCanceled = false
+    while (hasMoreChunks) {
+      const libraryItems = await Database.libraryItemModel.getLibraryItemsIncrement(offset, limit, { libraryId: library.id })
+      if (!libraryItems.length) {
+        break
       }
 
-      if (libraryItem.media.metadata.isbn && library.settings.skipMatchingMediaWithIsbn) {
-        Logger.debug(`[Scanner] matchLibraryItems: Skipping "${libraryItem.media.metadata.title
-          }" because it already has an ISBN (${i + 1} of ${itemsInLibrary.length})`)
-        continue;
-      }
+      offset += limit
+      hasMoreChunks = libraryItems.length === limit
 
-      Logger.debug(`[Scanner] matchLibraryItems: Quick matching "${libraryItem.media.metadata.title}" (${i + 1} of ${itemsInLibrary.length})`)
-      var result = await this.quickMatchLibraryItem(libraryItem, { provider })
-      if (result.warning) {
-        Logger.warn(`[Scanner] matchLibraryItems: Match warning ${result.warning} for library item "${libraryItem.media.metadata.title}"`)
-      } else if (result.updated) {
-        libraryScan.resultsUpdated++
-      }
-
-      if (this.cancelLibraryScan[libraryScan.libraryId]) {
-        Logger.info(`[Scanner] matchLibraryItems: Library match scan canceled for "${libraryScan.libraryName}"`)
-        delete this.cancelLibraryScan[libraryScan.libraryId]
-        var scanData = libraryScan.getScanEmitData
-        scanData.results = null
-        SocketAuthority.emitter('scan_complete', scanData)
-        this.librariesScanning = this.librariesScanning.filter(ls => ls.id !== library.id)
-        return
+      const shouldContinue = await this.matchLibraryItemsChunk(apiRouterCtx, library, libraryItems, libraryScan)
+      if (!shouldContinue) {
+        isCanceled = true
+        break
       }
     }
 
-    this.librariesScanning = this.librariesScanning.filter(ls => ls.id !== library.id)
-    SocketAuthority.emitter('scan_complete', libraryScan.getScanEmitData)
-  }
+    if (offset === 0) {
+      Logger.error(`[Scanner] matchLibraryItems: Library has no items ${library.id}`)
+      libraryScan.setComplete()
+      const taskFailedString = {
+        text: 'No items found',
+        key: 'MessageNoItemsFound'
+      }
+      task.setFailed(taskFailedString)
+    } else {
+      libraryScan.setComplete()
 
-  probeAudioFileWithTone(audioFile) {
-    return MediaFileScanner.probeAudioFileWithTone(audioFile)
+      task.data.scanResults = libraryScan.scanResults
+      if (isCanceled) {
+        const taskFinishedString = {
+          text: 'Task canceled by user',
+          key: 'MessageTaskCanceledByUser'
+        }
+        task.setFinished(taskFinishedString)
+      } else {
+        task.setFinished(null, true)
+      }
+    }
+
+    delete LibraryScanner.cancelLibraryScan[libraryScan.libraryId]
+    LibraryScanner.librariesScanning = LibraryScanner.librariesScanning.filter((lid) => lid !== library.id)
+    TaskManager.taskFinished(task)
   }
 }
-module.exports = Scanner
+module.exports = new Scanner()

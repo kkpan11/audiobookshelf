@@ -7,7 +7,7 @@
       <Nuxt :key="currentLang" />
     </div>
 
-    <app-stream-container ref="streamContainer" />
+    <app-media-player-container ref="mediaPlayerContainer" />
 
     <modals-item-edit-modal />
     <modals-collections-add-create-modal />
@@ -19,14 +19,14 @@
     <modals-authors-edit-modal />
     <modals-batch-quick-match-model />
     <modals-rssfeed-open-close-modal />
+    <modals-raw-cover-preview-modal />
+    <modals-share-modal />
     <prompt-confirm />
     <readers-reader />
   </div>
 </template>
 
 <script>
-import CloseButton from '@/components/widgets/CloseButton'
-
 export default {
   middleware: 'authenticated',
   data() {
@@ -35,7 +35,9 @@ export default {
       isSocketConnected: false,
       isFirstSocketConnection: true,
       socketConnectionToastId: null,
-      currentLang: null
+      currentLang: null,
+      multiSessionOtherSessionId: null, // Used for multiple sessions open warning toast
+      multiSessionCurrentSessionId: null // Used for multiple sessions open warning toast
     }
   },
   watch: {
@@ -121,22 +123,6 @@ export default {
     init(payload) {
       console.log('Init Payload', payload)
 
-      // Start scans currently running
-      if (payload.librariesScanning) {
-        payload.librariesScanning.forEach((libraryScan) => {
-          this.scanStart(libraryScan)
-        })
-      }
-
-      // Remove any current scans that are no longer running
-      var currentScans = [...this.$store.state.scanners.libraryScans]
-      currentScans.forEach((ls) => {
-        if (!payload.librariesScanning || !payload.librariesScanning.find((_ls) => _ls.id === ls.id)) {
-          this.$toast.dismiss(ls.toastId)
-          this.$store.commit('scanners/remove', ls)
-        }
-      })
-
       if (payload.usersOnline) {
         this.$store.commit('users/setUsersOnline', payload.usersOnline)
       }
@@ -144,23 +130,23 @@ export default {
       this.$eventBus.$emit('socket_init')
     },
     streamOpen(stream) {
-      if (this.$refs.streamContainer) this.$refs.streamContainer.streamOpen(stream)
+      if (this.$refs.mediaPlayerContainer) this.$refs.mediaPlayerContainer.streamOpen(stream)
     },
     streamClosed(streamId) {
-      if (this.$refs.streamContainer) this.$refs.streamContainer.streamClosed(streamId)
+      if (this.$refs.mediaPlayerContainer) this.$refs.mediaPlayerContainer.streamClosed(streamId)
     },
     streamProgress(data) {
-      if (this.$refs.streamContainer) this.$refs.streamContainer.streamProgress(data)
+      if (this.$refs.mediaPlayerContainer) this.$refs.mediaPlayerContainer.streamProgress(data)
     },
     streamReady() {
-      if (this.$refs.streamContainer) this.$refs.streamContainer.streamReady()
+      if (this.$refs.mediaPlayerContainer) this.$refs.mediaPlayerContainer.streamReady()
     },
     streamReset(payload) {
-      if (this.$refs.streamContainer) this.$refs.streamContainer.streamReset(payload)
+      if (this.$refs.mediaPlayerContainer) this.$refs.mediaPlayerContainer.streamReset(payload)
     },
     streamError({ id, errorMessage }) {
       this.$toast.error(`Stream Failed: ${errorMessage}`)
-      if (this.$refs.streamContainer) this.$refs.streamContainer.streamError(id)
+      if (this.$refs.mediaPlayerContainer) this.$refs.mediaPlayerContainer.streamError(id)
     },
     libraryAdded(library) {
       this.$store.commit('libraries/addUpdate', library)
@@ -226,49 +212,15 @@ export default {
         this.libraryItemAdded(ab)
       })
     },
-    scanComplete(data) {
-      console.log('Scan complete received', data)
-
-      var message = `${data.type === 'match' ? 'Match' : 'Scan'} "${data.name}" complete!`
-      if (data.results) {
-        var scanResultMsgs = []
-        var results = data.results
-        if (results.added) scanResultMsgs.push(`${results.added} added`)
-        if (results.updated) scanResultMsgs.push(`${results.updated} updated`)
-        if (results.removed) scanResultMsgs.push(`${results.removed} removed`)
-        if (results.missing) scanResultMsgs.push(`${results.missing} missing`)
-        if (!scanResultMsgs.length) message += '\nEverything was up to date'
-        else message += '\n' + scanResultMsgs.join('\n')
-      } else {
-        message = `${data.type === 'match' ? 'Match' : 'Scan'} "${data.name}" was canceled`
-      }
-
-      var existingScan = this.$store.getters['scanners/getLibraryScan'](data.id)
-      if (existingScan && !isNaN(existingScan.toastId)) {
-        this.$toast.update(existingScan.toastId, { content: message, options: { timeout: 5000, type: 'success', closeButton: false, onClose: () => null } }, true)
-      } else {
-        this.$toast.success(message, { timeout: 5000 })
-      }
-
-      this.$store.commit('scanners/remove', data)
+    trackStarted(data) {
+      this.$store.commit('tasks/updateAudioFilesEncoding', { libraryItemId: data.libraryItemId, ino: data.ino, progress: '0%' })
     },
-    onScanToastCancel(id) {
-      this.$root.socket.emit('cancel_scan', id)
+    trackProgress(data) {
+      this.$store.commit('tasks/updateAudioFilesEncoding', { libraryItemId: data.libraryItemId, ino: data.ino, progress: `${Math.round(data.progress)}%` })
     },
-    scanStart(data) {
-      data.toastId = this.$toast(`${data.type === 'match' ? 'Matching' : 'Scanning'} "${data.name}"...`, { timeout: false, type: 'info', draggable: false, closeOnClick: false, closeButton: CloseButton, closeButtonClassName: 'cancel-scan-btn', showCloseButtonOnHover: false, onClose: () => this.onScanToastCancel(data.id) })
-      this.$store.commit('scanners/addUpdate', data)
-    },
-    scanProgress(data) {
-      var existingScan = this.$store.getters['scanners/getLibraryScan'](data.id)
-      if (existingScan && !isNaN(existingScan.toastId)) {
-        data.toastId = existingScan.toastId
-        this.$toast.update(existingScan.toastId, { content: `Scanning "${existingScan.name}"... ${data.progress.progress || 0}%`, options: { timeout: false } }, true)
-      } else {
-        data.toastId = this.$toast(`Scanning "${data.name}"...`, { timeout: false, type: 'info', draggable: false, closeOnClick: false, closeButton: CloseButton, closeButtonClassName: 'cancel-scan-btn', showCloseButtonOnHover: false, onClose: () => this.onScanToastCancel(data.id) })
-      }
-
-      this.$store.commit('scanners/addUpdate', data)
+    trackFinished(data) {
+      this.$store.commit('tasks/updateAudioFilesEncoding', { libraryItemId: data.libraryItemId, ino: data.ino, progress: '100%' })
+      this.$store.commit('tasks/updateAudioFilesFinished', { libraryItemId: data.libraryItemId, ino: data.ino, finished: true })
     },
     taskStarted(task) {
       console.log('Task started', task)
@@ -277,6 +229,9 @@ export default {
     taskFinished(task) {
       console.log('Task finished', task)
       this.$store.commit('tasks/addUpdateTask', task)
+    },
+    taskProgress(data) {
+      this.$store.commit('tasks/updateTaskProgress', { libraryItemId: data.libraryItemId, progress: `${Math.round(data.progress)}%` })
     },
     metadataEmbedQueueUpdate(data) {
       if (data.queued) {
@@ -300,14 +255,27 @@ export default {
       this.$store.commit('users/updateUserOnline', user)
     },
     userSessionClosed(sessionId) {
-      if (this.$refs.streamContainer) this.$refs.streamContainer.sessionClosedEvent(sessionId)
+      // If this session or other session is closed then dismiss multiple sessions warning toast
+      if (sessionId === this.multiSessionOtherSessionId || this.multiSessionCurrentSessionId === sessionId) {
+        this.multiSessionOtherSessionId = null
+        this.multiSessionCurrentSessionId = null
+        this.$toast.dismiss('multiple-sessions')
+      }
+      if (this.$refs.mediaPlayerContainer) this.$refs.mediaPlayerContainer.sessionClosedEvent(sessionId)
     },
     userMediaProgressUpdate(payload) {
       this.$store.commit('user/updateMediaProgress', payload)
 
       if (payload.data) {
-        if (this.$store.getters['getIsMediaStreaming'](payload.data.libraryItemId, payload.data.episodeId)) {
-          // TODO: Update currently open session if being played from another device
+        if (this.$store.getters['getIsMediaStreaming'](payload.data.libraryItemId, payload.data.episodeId) && this.$store.state.playbackSessionId !== payload.sessionId) {
+          this.multiSessionOtherSessionId = payload.sessionId
+          this.multiSessionCurrentSessionId = this.$store.state.playbackSessionId
+          console.log(`Media progress was updated from another session (${this.multiSessionOtherSessionId}) for currently open media. Device description=${payload.deviceDescription}. Current session id=${this.multiSessionCurrentSessionId}`)
+          if (this.$store.state.streamIsPlaying) {
+            this.$toast.update('multiple-sessions', { content: `Another session is open for this item on device ${payload.deviceDescription}`, options: { timeout: 20000, type: 'warning', pauseOnFocusLoss: false } }, true)
+          } else {
+            this.$eventBus.$emit('playback-time-update', payload.data.currentTime)
+          }
         }
       }
     },
@@ -327,6 +295,10 @@ export default {
         }
       }
       this.$store.commit('libraries/removeCollection', collection)
+    },
+    seriesRemoved({ id, libraryId }) {
+      if (this.currentLibraryId !== libraryId) return
+      this.$store.commit('libraries/removeSeriesFromFilterData', id)
     },
     playlistAdded(playlist) {
       if (playlist.userId !== this.user.id || this.currentLibraryId !== playlist.libraryId) return
@@ -365,6 +337,19 @@ export default {
     adminMessageEvt(message) {
       this.$toast.info(message)
     },
+    ereaderDevicesUpdated(data) {
+      if (!data?.ereaderDevices) return
+
+      this.$store.commit('libraries/setEReaderDevices', data.ereaderDevices)
+    },
+    customMetadataProviderAdded(provider) {
+      if (!provider?.id) return
+      this.$store.commit('scanners/addCustomMetadataProvider', provider)
+    },
+    customMetadataProviderRemoved(provider) {
+      if (!provider?.id) return
+      this.$store.commit('scanners/removeCustomMetadataProvider', provider)
+    },
     initializeSocket() {
       this.socket = this.$nuxtSocket({
         name: process.env.NODE_ENV === 'development' ? 'dev' : 'prod',
@@ -372,7 +357,8 @@ export default {
         teardown: false,
         transports: ['websocket'],
         upgrade: false,
-        reconnection: true
+        reconnection: true,
+        path: `${this.$config.routerBasePath}/socket.io`
       })
       this.$root.socket = this.socket
       console.log('Socket initialized')
@@ -422,26 +408,35 @@ export default {
       this.socket.on('collection_updated', this.collectionUpdated)
       this.socket.on('collection_removed', this.collectionRemoved)
 
+      // Series Listeners
+      this.socket.on('series_removed', this.seriesRemoved)
+
       // User Playlist Listeners
       this.socket.on('playlist_added', this.playlistAdded)
       this.socket.on('playlist_updated', this.playlistUpdated)
       this.socket.on('playlist_removed', this.playlistRemoved)
 
-      // Scan Listeners
-      this.socket.on('scan_start', this.scanStart)
-      this.socket.on('scan_complete', this.scanComplete)
-      this.socket.on('scan_progress', this.scanProgress)
-
       // Task Listeners
       this.socket.on('task_started', this.taskStarted)
       this.socket.on('task_finished', this.taskFinished)
       this.socket.on('metadata_embed_queue_update', this.metadataEmbedQueueUpdate)
+      this.socket.on('track_started', this.trackStarted)
+      this.socket.on('track_finished', this.trackFinished)
+      this.socket.on('track_progress', this.trackProgress)
+      this.socket.on('task_progress', this.taskProgress)
+
+      // EReader Device Listeners
+      this.socket.on('ereader-devices-updated', this.ereaderDevicesUpdated)
 
       this.socket.on('backup_applied', this.backupApplied)
 
       this.socket.on('batch_quickmatch_complete', this.batchQuickMatchComplete)
 
       this.socket.on('admin_message', this.adminMessageEvt)
+
+      // Custom metadata provider Listeners
+      this.socket.on('custom_metadata_provider_added', this.customMetadataProviderAdded)
+      this.socket.on('custom_metadata_provider_removed', this.customMetadataProviderRemoved)
     },
     showUpdateToast(versionData) {
       var ignoreVersion = localStorage.getItem('ignoreVersion')
@@ -468,9 +463,9 @@ export default {
       }
     },
     checkActiveElementIsInput() {
-      var activeElement = document.activeElement
-      var inputs = ['input', 'select', 'button', 'textarea']
-      return activeElement && inputs.indexOf(activeElement.tagName.toLowerCase()) !== -1
+      const activeElement = document.activeElement
+      const inputs = ['input', 'select', 'button', 'textarea', 'trix-editor']
+      return activeElement && inputs.some((i) => i === activeElement.tagName.toLowerCase())
     },
     getHotkeyName(e) {
       var keyCode = e.keyCode || e.which
@@ -537,12 +532,6 @@ export default {
         .catch((err) => console.error(err))
     },
     initLocalStorage() {
-      // If experimental features set in local storage
-      var experimentalFeaturesSaved = localStorage.getItem('experimental')
-      if (experimentalFeaturesSaved === '1') {
-        this.$store.commit('setExperimentalFeatures', true)
-      }
-
       // Queue auto play
       var playerQueueAutoPlay = localStorage.getItem('playerQueueAutoPlay')
       this.$store.commit('setPlayerQueueAutoPlay', playerQueueAutoPlay !== '0')
@@ -569,6 +558,7 @@ export default {
     changeLanguage(code) {
       console.log('Changed lang', code)
       this.currentLang = code
+      document.documentElement.lang = code
     }
   },
   beforeMount() {
@@ -592,6 +582,11 @@ export default {
     if (this.$route.query.error) {
       this.$toast.error(this.$route.query.error)
       this.$router.replace(this.$route.path)
+    }
+
+    // Set lang on HTML tag
+    if (this.$languageCodes?.current) {
+      document.documentElement.lang = this.$languageCodes.current
     }
   },
   beforeDestroy() {

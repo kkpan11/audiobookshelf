@@ -15,13 +15,13 @@
             <div class="flex-grow" />
 
             <ui-btn v-if="showPlayButton" :disabled="streaming" color="success" :padding-x="4" small class="flex items-center h-9 mr-2" @click="clickPlay">
-              <span v-show="!streaming" class="material-icons text-2xl -ml-2 pr-1 text-white">play_arrow</span>
-              {{ streaming ? $strings.ButtonPlaying : $strings.ButtonPlay }}
+              <span v-show="!streaming" class="material-symbols fill text-2xl -ml-2 pr-1 text-white">play_arrow</span>
+              {{ streaming ? $strings.ButtonPlaying : $strings.ButtonPlayAll }}
             </ui-btn>
 
-            <ui-icon-btn v-if="userCanUpdate" icon="edit" class="mx-0.5" @click="editClick" />
+            <ui-icon-btn icon="edit" class="mx-0.5" @click="editClick" />
 
-            <ui-icon-btn v-if="userCanDelete" icon="delete" class="mx-0.5" @click="removeClick" />
+            <ui-icon-btn icon="delete" class="mx-0.5" @click="removeClick" />
           </div>
 
           <div class="my-8 max-w-2xl">

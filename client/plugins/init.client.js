@@ -6,7 +6,6 @@ import * as locale from 'date-fns/locale'
 
 Vue.directive('click-outside', vClickOutside.directive)
 
-
 Vue.prototype.$setDateFnsLocale = (localeString) => {
   if (!locale[localeString]) return 0
   return setDefaultOptions({ locale: locale[localeString] })
@@ -24,20 +23,20 @@ Vue.prototype.$formatJsDate = (jsdate, fnsFormat = 'MM/dd/yyyy HH:mm') => {
   return format(jsdate, fnsFormat)
 }
 Vue.prototype.$formatTime = (unixms, fnsFormat = 'HH:mm') => {
-    if (!unixms) return ''
-    return format(unixms, fnsFormat)
+  if (!unixms) return ''
+  return format(unixms, fnsFormat)
 }
 Vue.prototype.$formatJsTime = (jsdate, fnsFormat = 'HH:mm') => {
-    if (!jsdate || !isDate(jsdate)) return ''
-    return format(jsdate, fnsFormat)
+  if (!jsdate || !isDate(jsdate)) return ''
+  return format(jsdate, fnsFormat)
 }
 Vue.prototype.$formatDatetime = (unixms, fnsDateFormart = 'MM/dd/yyyy', fnsTimeFormat = 'HH:mm') => {
-    if (!unixms) return ''
-    return format(unixms, `${fnsDateFormart} ${fnsTimeFormat}`)
+  if (!unixms) return ''
+  return format(unixms, `${fnsDateFormart} ${fnsTimeFormat}`)
 }
 Vue.prototype.$formatJsDatetime = (jsdate, fnsDateFormart = 'MM/dd/yyyy', fnsTimeFormat = 'HH:mm') => {
-    if (!jsdate || !isDate(jsdate)) return ''
-    return format(jsdate, `${fnsDateFormart} ${fnsTimeFormat}`)
+  if (!jsdate || !isDate(jsdate)) return ''
+  return format(jsdate, `${fnsDateFormart} ${fnsTimeFormat}`)
 }
 Vue.prototype.$addDaysToToday = (daysToAdd) => {
   var date = addDays(new Date(), daysToAdd)
@@ -77,6 +76,7 @@ Vue.prototype.$sanitizeFilename = (filename, colonReplacement = ' - ') => {
     .replace(lineBreaks, replacement)
     .replace(windowsReservedRe, replacement)
     .replace(windowsTrailingRe, replacement)
+    .replace(/\s+/g, ' ') // Replace consecutive spaces with a single space
 
   // Check if basename is too many bytes
   const ext = Path.extname(sanitized) // separate out file extension
@@ -111,14 +111,15 @@ Vue.prototype.$sanitizeSlug = (str) => {
   str = str.toLowerCase()
 
   // remove accents, swap ñ for n, etc
-  var from = "àáäâèéëêìíïîòóöôùúüûñçěščřžýúůďťň·/,:;"
-  var to = "aaaaeeeeiiiioooouuuuncescrzyuudtn-----"
+  var from = 'àáäâèéëêìíïîòóöôùúüûñçěščřžýúůďťň·/,:;'
+  var to = 'aaaaeeeeiiiioooouuuuncescrzyuudtn-----'
 
   for (var i = 0, l = from.length; i < l; i++) {
     str = str.replace(new RegExp(from.charAt(i), 'g'), to.charAt(i))
   }
 
-  str = str.replace('.', '-') // replace a dot by a dash
+  str = str
+    .replace('.', '-') // replace a dot by a dash
     .replace(/[^a-z0-9 -_]/g, '') // remove invalid chars
     .replace(/\s+/g, '-') // collapse whitespace and replace by a dash
     .replace(/-+/g, '-') // collapse dashes
@@ -127,14 +128,18 @@ Vue.prototype.$sanitizeSlug = (str) => {
   return str
 }
 
-Vue.prototype.$copyToClipboard = (str, ctx) => {
+Vue.prototype.$copyToClipboard = (str) => {
   return new Promise((resolve) => {
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(str).then(() => {
-        if (ctx) ctx.$toast.success('Copied to clipboard')
-      }, (err) => {
-        console.error('Clipboard copy failed', str, err)
-      })
+      navigator.clipboard.writeText(str).then(
+        () => {
+          resolve(true)
+        },
+        (err) => {
+          console.error('Clipboard copy failed', str, err)
+          resolve(false)
+        }
+      )
     } else {
       const el = document.createElement('textarea')
       el.value = str
@@ -146,36 +151,28 @@ Vue.prototype.$copyToClipboard = (str, ctx) => {
       document.execCommand('copy')
       document.body.removeChild(el)
 
-      if (ctx) ctx.$toast.success('Copied to clipboard')
+      resolve(true)
     }
   })
 }
 
 function xmlToJson(xml) {
-  const json = {};
+  const json = {}
   for (const res of xml.matchAll(/(?:<(\w*)(?:\s[^>]*)*>)((?:(?!<\1).)*)(?:<\/\1>)|<(\w*)(?:\s*)*\/>/gm)) {
-    const key = res[1] || res[3];
-    const value = res[2] && xmlToJson(res[2]);
-    json[key] = ((value && Object.keys(value).length) ? value : res[2]) || null;
-
+    const key = res[1] || res[3]
+    const value = res[2] && xmlToJson(res[2])
+    json[key] = (value && Object.keys(value).length ? value : res[2]) || null
   }
-  return json;
+  return json
 }
 Vue.prototype.$xmlToJson = xmlToJson
-
-Vue.prototype.$encodeUriPath = (path) => {
-  return path.replace(/\\/g, '/').replace(/%/g, '%25').replace(/#/g, '%23')
-}
 
 const encode = (text) => encodeURIComponent(Buffer.from(text).toString('base64'))
 Vue.prototype.$encode = encode
 const decode = (text) => Buffer.from(decodeURIComponent(text), 'base64').toString()
 Vue.prototype.$decode = decode
 
-export {
-  encode,
-  decode
-}
+export { encode, decode }
 export default ({ app, store }, inject) => {
   app.$decode = decode
   app.$encode = encode

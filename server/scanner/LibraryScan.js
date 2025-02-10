@@ -1,24 +1,19 @@
 const Path = require('path')
+const uuidv4 = require('uuid').v4
 const fs = require('../libs/fsExtra')
 const date = require('../libs/dateAndTime')
 
 const Logger = require('../Logger')
-const Folder = require('../objects/Folder')
 const { LogLevel } = require('../utils/constants')
-const filePerms = require('../utils/filePerms')
-const { getId, secondsToTimestamp } = require('../utils/index')
+const { secondsToTimestamp, elapsedPretty } = require('../utils/index')
 
 class LibraryScan {
   constructor() {
     this.id = null
     this.type = null
-    this.libraryId = null
-    this.libraryName = null
-    this.libraryMediaType = null
-    this.folders = null
+    /** @type {import('../models/Library')} */
+    this.library = null
     this.verbose = false
-
-    this.scanOptions = null
 
     this.startedAt = null
     this.finishedAt = null
@@ -28,17 +23,29 @@ class LibraryScan {
     this.resultsAdded = 0
     this.resultsUpdated = 0
 
+    /** @type {string[]} */
+    this.authorsRemovedFromBooks = []
+    /** @type {string[]} */
+    this.seriesRemovedFromBooks = []
+
     this.logs = []
   }
 
-  get _scanOptions() { return this.scanOptions || {} }
-  get forceRescan() { return !!this._scanOptions.forceRescan }
-  get preferAudioMetadata() { return !!this._scanOptions.preferAudioMetadata }
-  get preferOpfMetadata() { return !!this._scanOptions.preferOpfMetadata }
-  get preferOverdriveMediaMarker() { return !!this._scanOptions.preferOverdriveMediaMarker }
-  get findCovers() { return !!this._scanOptions.findCovers }
+  get libraryId() {
+    return this.library.id
+  }
+  get libraryName() {
+    return this.library.name
+  }
+  get libraryMediaType() {
+    return this.library.mediaType
+  }
+  get libraryFolders() {
+    return this.library.libraryFolders
+  }
+
   get timestamp() {
-    return (new Date()).toISOString()
+    return new Date().toISOString()
   }
 
   get resultStats() {
@@ -47,34 +54,34 @@ class LibraryScan {
   get elapsedTimestamp() {
     return secondsToTimestamp(this.elapsed / 1000)
   }
-  get getScanEmitData() {
-    return {
-      id: this.libraryId,
-      type: this.type,
-      name: this.libraryName,
-      results: {
-        added: this.resultsAdded,
-        updated: this.resultsUpdated,
-        missing: this.resultsMissing
-      }
-    }
-  }
-  get totalResults() {
-    return this.resultsAdded + this.resultsUpdated + this.resultsMissing
-  }
   get logFilename() {
     return date.format(new Date(), 'YYYY-MM-DD') + '_' + this.id + '.txt'
+  }
+  get scanResultsString() {
+    const strs = []
+    if (this.resultsAdded) strs.push(`${this.resultsAdded} added`)
+    if (this.resultsUpdated) strs.push(`${this.resultsUpdated} updated`)
+    if (this.resultsMissing) strs.push(`${this.resultsMissing} missing`)
+    const changesDetected = strs.length > 0 ? strs.join(', ') : 'No changes needed'
+    const timeElapsed = `(${elapsedPretty(this.elapsed / 1000)})`
+    return `${changesDetected} ${timeElapsed}`
+  }
+
+  get scanResults() {
+    return {
+      added: this.resultsAdded,
+      updated: this.resultsUpdated,
+      missing: this.resultsMissing,
+      elapsed: this.elapsed,
+      text: this.scanResultsString
+    }
   }
 
   toJSON() {
     return {
       id: this.id,
       type: this.type,
-      libraryId: this.libraryId,
-      libraryName: this.libraryName,
-      libraryMediaType: this.libraryMediaType,
-      folders: this.folders.map(f => f.toJSON()),
-      scanOptions: this.scanOptions ? this.scanOptions.toJSON() : null,
+      library: this.library.toJSON(),
       startedAt: this.startedAt,
       finishedAt: this.finishedAt,
       elapsed: this.elapsed,
@@ -84,15 +91,15 @@ class LibraryScan {
     }
   }
 
-  setData(library, scanOptions, type = 'scan') {
-    this.id = getId('lscan')
+  /**
+   *
+   * @param {import('../models/Library')} library
+   * @param {string} type
+   */
+  setData(library, type = 'scan') {
+    this.id = uuidv4()
     this.type = type
-    this.libraryId = library.id
-    this.libraryName = library.name
-    this.libraryMediaType = library.mediaType
-    this.folders = library.folders.map(folder => new Folder(folder.toJSON()))
-
-    this.scanOptions = scanOptions
+    this.library = library
 
     this.startedAt = Date.now()
   }
@@ -120,22 +127,24 @@ class LibraryScan {
     }
 
     if (this.verbose) {
-      Logger.debug(`[LibraryScan] "${this.libraryName}":`, args)
+      Logger.debug(`[LibraryScan] "${this.libraryName}":`, ...args)
     }
     this.logs.push(logObj)
   }
 
   async saveLog() {
-    await Logger.logManager.ensureScanLogDir()
+    const scanLogDir = Path.join(global.MetadataPath, 'logs', 'scans')
 
-    const logDir = Path.join(global.MetadataPath, 'logs', 'scans')
-    const outputPath = Path.join(logDir, this.logFilename)
+    if (!(await fs.pathExists(scanLogDir))) {
+      await fs.mkdir(scanLogDir)
+    }
+
+    const outputPath = Path.join(scanLogDir, this.logFilename)
     const logLines = [JSON.stringify(this.toJSON())]
-    this.logs.forEach(l => {
+    this.logs.forEach((l) => {
       logLines.push(JSON.stringify(l))
     })
     await fs.writeFile(outputPath, logLines.join('\n') + '\n')
-    await filePerms.setDefault(outputPath)
 
     Logger.info(`[LibraryScan] Scan log saved "${outputPath}"`)
   }

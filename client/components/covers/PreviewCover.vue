@@ -7,14 +7,14 @@
       <img ref="cover" :src="cover" @error="imageError" @load="imageLoaded" class="w-full h-full absolute top-0 left-0" :class="showCoverBg ? 'object-contain' : 'object-fill'" />
 
       <a v-if="!imageFailed && showOpenNewTab && isHovering" :href="cover" @click.stop target="_blank" class="absolute bg-primary flex items-center justify-center shadow-sm rounded-full hover:scale-110 transform duration-100" :style="{ top: sizeMultiplier * 0.5 + 'rem', right: sizeMultiplier * 0.5 + 'rem', width: 2.5 * sizeMultiplier + 'rem', height: 2.5 * sizeMultiplier + 'rem' }">
-        <span class="material-icons" :style="{ fontSize: sizeMultiplier * 1.75 + 'rem' }">open_in_new</span>
+        <span class="material-symbols" :style="{ fontSize: sizeMultiplier * 1.75 + 'rem' }">open_in_new</span>
       </a>
     </div>
 
     <div v-if="imageFailed" class="absolute top-0 left-0 right-0 bottom-0 w-full h-full bg-red-100" :style="{ padding: placeholderCoverPadding + 'rem' }">
       <div class="w-full h-full border-2 border-error flex flex-col items-center justify-center">
-        <img src="/Logo.png" class="mb-2" :style="{ height: 64 * sizeMultiplier + 'px' }" />
-        <p class="text-center text-error" :style="{ fontSize: sizeMultiplier + 'rem' }">Invalid Cover</p>
+        <img v-if="width > 100" src="/Logo.png" class="mb-2" :style="{ height: 40 * sizeMultiplier + 'px' }" />
+        <p class="text-center text-error" :style="{ fontSize: invalidCoverFontSize + 'rem' }">Invalid Cover</p>
       </div>
     </div>
 
@@ -58,11 +58,14 @@ export default {
     sizeMultiplier() {
       return this.width / 120
     },
+    invalidCoverFontSize() {
+      return Math.max(this.sizeMultiplier * 0.8, 0.5)
+    },
     placeholderCoverPadding() {
       return 0.8 * this.sizeMultiplier
     },
     resolution() {
-      return `${this.naturalWidth}x${this.naturalHeight}px`
+      return `${this.naturalWidth}×${this.naturalHeight}px`
     },
     placeholderUrl() {
       const config = this.$config || this.$nuxt.$config

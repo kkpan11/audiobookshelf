@@ -3,7 +3,7 @@
     <div class="max-w-6xl mx-auto">
       <div class="flex flex-wrap sm:flex-nowrap justify-center mb-6">
         <div class="w-48 min-w-48">
-          <div class="w-full h-52">
+          <div class="w-full h-60">
             <covers-author-image :author="author" rounded="0" />
           </div>
         </div>
@@ -12,12 +12,15 @@
             <h1 class="text-2xl">{{ author.name }}</h1>
 
             <button v-if="userCanUpdate" class="w-8 h-8 rounded-full flex items-center justify-center mx-4 cursor-pointer text-gray-300 hover:text-warning transform hover:scale-125 duration-100" @click="editAuthor">
-              <span class="material-icons text-base">edit</span>
+              <span class="material-symbols text-base">edit</span>
             </button>
           </div>
 
           <p v-if="author.description" class="text-white text-opacity-60 uppercase text-xs mb-2">{{ $strings.LabelDescription }}</p>
-          <p class="text-white max-w-3xl text-sm leading-5">{{ author.description }}</p>
+          <p ref="description" id="author-description" class="text-white max-w-3xl text-base whitespace-pre-wrap" :class="{ 'show-full': showFullDescription }">{{ author.description }}</p>
+          <button v-if="isDescriptionClamped" class="py-0.5 flex items-center text-slate-300 hover:text-white" @click="showFullDescription = !showFullDescription">
+            {{ showFullDescription ? $strings.ButtonReadLess : $strings.ButtonReadMore }} <span class="material-symbols text-xl pl-1">{{ showFullDescription ? 'expand_less' : 'expand_more' }}</span>
+          </button>
         </div>
       </div>
 
@@ -43,14 +46,18 @@
 
 <script>
 export default {
-  async asyncData({ store, app, params, redirect }) {
-    const author = await app.$axios.$get(`/api/authors/${params.id}?library=${store.state.libraries.currentLibraryId}&include=items,series`).catch((error) => {
+  async asyncData({ store, app, params, redirect, query }) {
+    const author = await app.$axios.$get(`/api/authors/${params.id}?include=items,series`).catch((error) => {
       console.error('Failed to get author', error)
       return null
     })
 
     if (!author) {
-      return redirect(`/library/${store.state.libraries.currentLibraryId}/authors`)
+      return redirect(`/library/${store.state.libraries.currentLibraryId}/bookshelf/authors`)
+    }
+
+    if (store.state.libraries.currentLibraryId !== author.libraryId || !store.state.libraries.filterData) {
+      await store.dispatch('libraries/fetch', author.libraryId)
     }
 
     return {
@@ -58,7 +65,10 @@ export default {
     }
   },
   data() {
-    return {}
+    return {
+      isDescriptionClamped: false,
+      showFullDescription: false
+    }
   },
   computed: {
     streamLibraryItem() {
@@ -78,6 +88,10 @@ export default {
     }
   },
   methods: {
+    checkDescriptionClamped() {
+      if (!this.$refs.description) return
+      this.isDescriptionClamped = this.$refs.description.scrollHeight > this.$refs.description.clientHeight
+    },
     editAuthor() {
       this.$store.commit('globals/showEditAuthorModal', this.author)
     },
@@ -89,17 +103,19 @@ export default {
           series: this.authorSeries,
           libraryItems: this.libraryItems
         }
+        this.$nextTick(this.checkDescriptionClamped)
       }
     },
     authorRemoved(author) {
       if (author.id === this.author.id) {
         console.warn('Author was removed')
-        this.$router.replace(`/library/${this.currentLibraryId}/authors`)
+        this.$router.replace(`/library/${this.currentLibraryId}/bookshelf/authors`)
       }
     }
   },
   mounted() {
     if (!this.author) this.$router.replace('/')
+    this.checkDescriptionClamped()
 
     this.$root.socket.on('author_updated', this.authorUpdated)
     this.$root.socket.on('author_removed', this.authorRemoved)
@@ -110,3 +126,18 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+#author-description {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  max-height: 6.25rem;
+  transition: all 0.3s ease-in-out;
+}
+#author-description.show-full {
+  -webkit-line-clamp: unset;
+  max-height: 999rem;
+}
+</style>

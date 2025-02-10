@@ -1,62 +1,53 @@
 const Path = require('path')
 const fs = require('../libs/fsExtra')
 const stream = require('stream')
-const filePerms = require('../utils/filePerms')
 const Logger = require('../Logger')
 const { resizeImage } = require('../utils/ffmpegHelpers')
+const { encodeUriPath } = require('../utils/fileUtils')
+const Database = require('../Database')
 
 class CacheManager {
   constructor() {
+    this.CachePath = null
+    this.CoverCachePath = null
+    this.ImageCachePath = null
+    this.ItemCachePath = null
+  }
+
+  /**
+   * Create cache directory paths if they dont exist
+   */
+  async ensureCachePaths() {
+    // Creates cache paths if necessary and sets owner and permissions
     this.CachePath = Path.join(global.MetadataPath, 'cache')
     this.CoverCachePath = Path.join(this.CachePath, 'covers')
     this.ImageCachePath = Path.join(this.CachePath, 'images')
     this.ItemCachePath = Path.join(this.CachePath, 'items')
+
+    await fs.ensureDir(this.CachePath)
+    await fs.ensureDir(this.CoverCachePath)
+    await fs.ensureDir(this.ImageCachePath)
+    await fs.ensureDir(this.ItemCachePath)
   }
 
-  async ensureCachePaths() { // Creates cache paths if necessary and sets owner and permissions
-    var pathsCreated = false
-    if (!(await fs.pathExists(this.CachePath))) {
-      await fs.mkdir(this.CachePath)
-      pathsCreated = true
-    }
-
-    if (!(await fs.pathExists(this.CoverCachePath))) {
-      await fs.mkdir(this.CoverCachePath)
-      pathsCreated = true
-    }
-
-    if (!(await fs.pathExists(this.ImageCachePath))) {
-      await fs.mkdir(this.ImageCachePath)
-      pathsCreated = true
-    }
-
-    if (!(await fs.pathExists(this.ItemCachePath))) {
-      await fs.mkdir(this.ItemCachePath)
-      pathsCreated = true
-    }
-
-    if (pathsCreated) {
-      await filePerms.setDefault(this.CachePath)
-    }
-  }
-
-  async handleCoverCache(res, libraryItem, options = {}) {
+  async handleCoverCache(res, libraryItemId, options = {}) {
     const format = options.format || 'webp'
     const width = options.width || 400
     const height = options.height || null
 
     res.type(`image/${format}`)
 
-    const path = Path.join(this.CoverCachePath, `${libraryItem.id}_${width}${height ? `x${height}` : ''}`) + '.' + format
+    const cachePath = Path.join(this.CoverCachePath, `${libraryItemId}_${width}${height ? `x${height}` : ''}`) + '.' + format
 
     // Cache exists
-    if (await fs.pathExists(path)) {
+    if (await fs.pathExists(cachePath)) {
       if (global.XAccel) {
-        Logger.debug(`Use X-Accel to serve static file ${path}`)
-        return res.status(204).header({'X-Accel-Redirect': global.XAccel + path}).send()
+        const encodedURI = encodeUriPath(global.XAccel + cachePath)
+        Logger.debug(`Use X-Accel to serve static file ${encodedURI}`)
+        return res.status(204).header({ 'X-Accel-Redirect': encodedURI }).send()
       }
 
-      const r = fs.createReadStream(path)
+      const r = fs.createReadStream(cachePath)
       const ps = new stream.PassThrough()
       stream.pipeline(r, ps, (err) => {
         if (err) {
@@ -67,19 +58,19 @@ class CacheManager {
       return ps.pipe(res)
     }
 
-    if (!libraryItem.media.coverPath || !await fs.pathExists(libraryItem.media.coverPath)) {
-      return res.sendStatus(500)
+    // Cached cover does not exist, generate it
+    const coverPath = await Database.libraryItemModel.getCoverPath(libraryItemId)
+    if (!coverPath || !(await fs.pathExists(coverPath))) {
+      return res.sendStatus(404)
     }
 
-    const writtenFile = await resizeImage(libraryItem.media.coverPath, path, width, height)
+    const writtenFile = await resizeImage(coverPath, cachePath, width, height)
     if (!writtenFile) return res.sendStatus(500)
 
-    // Set owner and permissions of cache image
-    await filePerms.setDefault(path)
-
     if (global.XAccel) {
-      Logger.debug(`Use X-Accel to serve static file ${writtenFile}`)
-      return res.status(204).header({'X-Accel-Redirect': global.XAccel + writtenFile}).send()
+      const encodedURI = encodeUriPath(global.XAccel + writtenFile)
+      Logger.debug(`Use X-Accel to serve static file ${encodedURI}`)
+      return res.status(204).header({ 'X-Accel-Redirect': encodedURI }).send()
     }
 
     var readStream = fs.createReadStream(writtenFile)
@@ -95,27 +86,34 @@ class CacheManager {
   }
 
   async purgeEntityCache(entityId, cachePath) {
-    return Promise.all((await fs.readdir(cachePath)).reduce((promises, file) => {
-      if (file.startsWith(entityId)) {
-        Logger.debug(`[CacheManager] Going to purge ${file}`);
-        promises.push(this.removeCache(Path.join(cachePath, file)))
-      }
-      return promises
-    }, []))
+    if (!entityId || !cachePath) return []
+    return Promise.all(
+      (await fs.readdir(cachePath)).reduce((promises, file) => {
+        if (file.startsWith(entityId)) {
+          Logger.debug(`[CacheManager] Going to purge ${file}`)
+          promises.push(this.removeCache(Path.join(cachePath, file)))
+        }
+        return promises
+      }, [])
+    )
   }
 
   removeCache(path) {
     if (!path) return false
     return fs.pathExists(path).then((exists) => {
       if (!exists) return false
-      return fs.unlink(path).then(() => true).catch((err) => {
-        Logger.error(`[CacheManager] Failed to remove cache "${path}"`, err)
-        return false
-      })
+      return fs
+        .unlink(path)
+        .then(() => true)
+        .catch((err) => {
+          Logger.error(`[CacheManager] Failed to remove cache "${path}"`, err)
+          return false
+        })
     })
   }
 
   async purgeAll() {
+    Logger.info(`[CacheManager] Purging all cache at "${this.CachePath}"`)
     if (await fs.pathExists(this.CachePath)) {
       await fs.remove(this.CachePath).catch((error) => {
         Logger.error(`[CacheManager] Failed to remove cache dir "${this.CachePath}"`, error)
@@ -125,6 +123,7 @@ class CacheManager {
   }
 
   async purgeItems() {
+    Logger.info(`[CacheManager] Purging items cache at "${this.ItemCachePath}"`)
     if (await fs.pathExists(this.ItemCachePath)) {
       await fs.remove(this.ItemCachePath).catch((error) => {
         Logger.error(`[CacheManager] Failed to remove items cache dir "${this.ItemCachePath}"`, error)
@@ -133,18 +132,25 @@ class CacheManager {
     await this.ensureCachePaths()
   }
 
-  async handleAuthorCache(res, author, options = {}) {
+  /**
+   *
+   * @param {import('express').Response} res
+   * @param {String} authorId
+   * @param {{ format?: string, width?: number, height?: number }} options
+   * @returns
+   */
+  async handleAuthorCache(res, authorId, options = {}) {
     const format = options.format || 'webp'
     const width = options.width || 400
     const height = options.height || null
 
     res.type(`image/${format}`)
 
-    var path = Path.join(this.ImageCachePath, `${author.id}_${width}${height ? `x${height}` : ''}`) + '.' + format
+    var cachePath = Path.join(this.ImageCachePath, `${authorId}_${width}${height ? `x${height}` : ''}`) + '.' + format
 
     // Cache exists
-    if (await fs.pathExists(path)) {
-      const r = fs.createReadStream(path)
+    if (await fs.pathExists(cachePath)) {
+      const r = fs.createReadStream(cachePath)
       const ps = new stream.PassThrough()
       stream.pipeline(r, ps, (err) => {
         if (err) {
@@ -155,14 +161,16 @@ class CacheManager {
       return ps.pipe(res)
     }
 
-    let writtenFile = await resizeImage(author.imagePath, path, width, height)
-    if (!writtenFile) return res.sendStatus(500)
+    const author = await Database.authorModel.findByPk(authorId)
+    if (!author || !author.imagePath || !(await fs.pathExists(author.imagePath))) {
+      return res.sendStatus(404)
+    }
 
-    // Set owner and permissions of cache image
-    await filePerms.setDefault(path)
+    let writtenFile = await resizeImage(author.imagePath, cachePath, width, height)
+    if (!writtenFile) return res.sendStatus(500)
 
     var readStream = fs.createReadStream(writtenFile)
     readStream.pipe(res)
   }
 }
-module.exports = CacheManager
+module.exports = new CacheManager()

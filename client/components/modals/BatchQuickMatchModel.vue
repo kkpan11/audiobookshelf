@@ -6,7 +6,7 @@
       </div>
     </template>
 
-    <div ref="container" class="w-full rounded-lg bg-primary box-shadow-md overflow-y-auto overflow-x-hidden" style="max-height: 80vh">
+    <div ref="container" class="w-full rounded-lg bg-bg box-shadow-md overflow-y-auto overflow-x-hidden" style="max-height: 80vh">
       <div v-if="show" class="w-full h-full py-4">
         <div class="w-full overflow-y-auto overflow-x-hidden max-h-96">
           <div class="flex px-8 items-center py-2">
@@ -19,7 +19,7 @@
             <ui-tooltip :text="$strings.LabelUpdateCoverHelp">
               <p class="pl-4">
                 {{ $strings.LabelUpdateCover }}
-                <span class="material-icons icon-text">info_outlined</span>
+                <span class="material-symbols icon-text">info</span>
               </p>
             </ui-tooltip>
           </div>
@@ -28,7 +28,7 @@
             <ui-tooltip :text="$strings.LabelUpdateDetailsHelp">
               <p class="pl-4">
                 {{ $strings.LabelUpdateDetails }}
-                <span class="material-icons icon-text">info_outlined</span>
+                <span class="material-symbols icon-text">info</span>
               </p>
             </ui-tooltip>
           </div>
@@ -54,8 +54,7 @@ export default {
       options: {
         provider: undefined,
         overrideDetails: true,
-        overrideCover: true,
-        overrideDefaults: true
+        overrideCover: true
       }
     }
   },
@@ -99,8 +98,8 @@ export default {
     init() {
       // If we don't have a set provider (first open of dialog) or we've switched library, set
       // the selected provider to the current library default provider
-      if (!this.options.provider || this.options.lastUsedLibrary != this.currentLibraryId) {
-        this.options.lastUsedLibrary = this.currentLibraryId
+      if (!this.options.provider || this.lastUsedLibrary != this.currentLibraryId) {
+        this.lastUsedLibrary = this.currentLibraryId
         this.options.provider = this.libraryProvider
       }
     },
@@ -116,10 +115,10 @@ export default {
           libraryItemIds: this.selectedBookIds
         })
         .then(() => {
-          this.$toast.info('Batch quick match of ' + this.selectedBookIds.length + ' books started!')
+          this.$toast.info(this.$getString('ToastBatchQuickMatchStarted', [this.selectedBookIds.length]))
         })
         .catch((error) => {
-          this.$toast.error('Batch quick match failed')
+          this.$toast.error(this.$strings.ToastBatchQuickMatchFailed)
           console.error('Failed to batch quick match', error)
         })
         .finally(() => {

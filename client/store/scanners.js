@@ -1,5 +1,4 @@
 export const state = () => ({
-  libraryScans: [],
   providers: [
     {
       text: 'Google Books',
@@ -63,29 +62,65 @@ export const state = () => ({
       text: 'iTunes',
       value: 'itunes'
     }
+  ],
+  coverOnlyProviders: [
+    {
+      text: 'AudiobookCovers.com',
+      value: 'audiobookcovers'
+    }
   ]
 })
 
 export const getters = {
-  getLibraryScan: state => id => {
-    return state.libraryScans.find(ls => ls.id === id)
+  checkBookProviderExists: state => (providerValue) => {
+    return state.providers.some(p => p.value === providerValue)
+  },
+  checkPodcastProviderExists: state => (providerValue) => {
+    return state.podcastProviders.some(p => p.value === providerValue)
   }
 }
 
-export const actions = {
-
-}
+export const actions = {}
 
 export const mutations = {
-  addUpdate(state, data) {
-    var index = state.libraryScans.findIndex(lib => lib.id === data.id)
-    if (index >= 0) {
-      state.libraryScans.splice(index, 1, data)
+  addCustomMetadataProvider(state, provider) {
+    if (provider.mediaType === 'book') {
+      if (state.providers.some(p => p.value === provider.slug)) return
+      state.providers.push({
+        text: provider.name,
+        value: provider.slug
+      })
     } else {
-      state.libraryScans.push(data)
+      if (state.podcastProviders.some(p => p.value === provider.slug)) return
+      state.podcastProviders.push({
+        text: provider.name,
+        value: provider.slug
+      })
     }
   },
-  remove(state, data) {
-    state.libraryScans = state.libraryScans.filter(scan => scan.id !== data.id)
+  removeCustomMetadataProvider(state, provider) {
+    if (provider.mediaType === 'book') {
+      state.providers = state.providers.filter(p => p.value !== provider.slug)
+    } else {
+      state.podcastProviders = state.podcastProviders.filter(p => p.value !== provider.slug)
+    }
+  },
+  setCustomMetadataProviders(state, providers) {
+    if (!providers?.length) return
+
+    const mediaType = providers[0].mediaType
+    if (mediaType === 'book') {
+      // clear previous values, and add new values to the end
+      state.providers = state.providers.filter((p) => !p.value.startsWith('custom-'))
+      state.providers = [
+        ...state.providers,
+        ...providers.map((p) => ({
+          text: p.name,
+          value: p.slug
+        }))
+      ]
+    } else {
+      // Podcast providers not supported yet
+    }
   }
 }

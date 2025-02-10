@@ -6,21 +6,25 @@
       </div>
     </template>
     <form @submit.prevent="submitForm">
-      <div class="px-4 w-full text-sm py-6 rounded-lg bg-bg shadow-lg border border-black-300">
+      <div class="px-4 w-full text-sm py-6 rounded-lg bg-bg shadow-lg border border-black-300 overflow-y-auto overflow-x-hidden" style="min-height: 400px; max-height: 80vh">
         <div class="w-full p-8">
           <div class="flex py-2">
             <div class="w-1/2 px-2">
-              <ui-text-input-with-label v-model="newUser.username" :label="$strings.LabelUsername" />
+              <ui-text-input-with-label v-model.trim="newUser.username" :label="$strings.LabelUsername" />
             </div>
             <div class="w-1/2 px-2">
               <ui-text-input-with-label v-if="!isEditingRoot" v-model="newUser.password" :label="isNew ? $strings.LabelPassword : $strings.LabelChangePassword" type="password" />
+              <ui-text-input-with-label v-else v-model.trim="newUser.email" :label="$strings.LabelEmail" />
             </div>
           </div>
           <div v-show="!isEditingRoot" class="flex py-2">
-            <div class="px-2 w-52">
-              <ui-dropdown v-model="newUser.type" :label="$strings.LabelAccountType" :disabled="isEditingRoot" :items="accountTypes" @input="userTypeUpdated" />
+            <div class="w-1/2 px-2">
+              <ui-text-input-with-label v-model.trim="newUser.email" :label="$strings.LabelEmail" />
             </div>
-            <div class="flex-grow" />
+            <div class="px-2 w-52">
+              <ui-dropdown v-model="newUser.type" :label="$strings.LabelAccountType" :disabled="isEditingRoot" :items="accountTypes" small @input="userTypeUpdated" />
+            </div>
+
             <div class="flex items-center pt-4 px-2">
               <p class="px-3 font-semibold" id="user-enabled-toggle" :class="isEditingRoot ? 'text-gray-300' : ''">{{ $strings.LabelEnable }}</p>
               <ui-toggle-switch labeledBy="user-enabled-toggle" v-model="newUser.isActive" :disabled="isEditingRoot" />
@@ -67,6 +71,15 @@
 
             <div class="flex items-center my-2 max-w-md">
               <div class="w-1/2">
+                <p id="ereader-permissions-toggle">{{ $strings.LabelPermissionsCreateEreader }}</p>
+              </div>
+              <div class="w-1/2">
+                <ui-toggle-switch labeledBy="ereader-permissions-toggle" v-model="newUser.permissions.createEreader" />
+              </div>
+            </div>
+
+            <div class="flex items-center my-2 max-w-md">
+              <div class="w-1/2">
                 <p id="explicit-content-permissions-toggle">{{ $strings.LabelPermissionsAccessExplicitContent }}</p>
               </div>
               <div class="w-1/2">
@@ -96,12 +109,19 @@
               </div>
             </div>
             <div v-if="!newUser.permissions.accessAllTags" class="my-4">
-              <ui-multi-select-dropdown v-model="newUser.itemTagsAccessible" :items="itemTags" :label="$strings.LabelTagsAccessibleToUser" />
+              <div class="flex items-center">
+                <ui-multi-select-dropdown v-model="newUser.itemTagsSelected" :items="itemTags" :label="tagsSelectionText" />
+                <div class="flex items-center pt-4 px-2">
+                  <p class="px-3 font-semibold" id="selected-tags-not-accessible--permissions-toggle">{{ $strings.LabelInvert }}</p>
+                  <ui-toggle-switch labeledBy="selected-tags-not-accessible--permissions-toggle" v-model="newUser.permissions.selectedTagsNotAccessible" />
+                </div>
+              </div>
             </div>
           </div>
 
           <div class="flex pt-4 px-2">
-            <ui-btn v-if="isEditingRoot" to="/account">{{ $strings.ButtonChangeRootPassword }}</ui-btn>
+            <ui-btn v-if="hasOpenIDLink" small :loading="unlinkingFromOpenID" color="primary" type="button" class="mr-2" @click.stop="unlinkOpenID">{{ $strings.ButtonUnlinkOpenId }}</ui-btn>
+            <ui-btn v-if="isEditingRoot" small class="flex items-center" to="/account">{{ $strings.ButtonChangeRootPassword }}</ui-btn>
             <div class="flex-grow" />
             <ui-btn color="success" type="submit">{{ $strings.ButtonSubmit }}</ui-btn>
           </div>
@@ -126,7 +146,8 @@ export default {
       newUser: {},
       isNew: true,
       tags: [],
-      loadingTags: false
+      loadingTags: false,
+      unlinkingFromOpenID: false
     }
   },
   watch: {
@@ -170,7 +191,7 @@ export default {
       return this.isNew ? this.$strings.HeaderNewAccount : this.$strings.HeaderUpdateAccount
     },
     isEditingRoot() {
-      return this.account && this.account.type === 'root'
+      return this.account?.type === 'root'
     },
     libraries() {
       return this.$store.state.libraries.libraries
@@ -185,6 +206,12 @@ export default {
           value: t
         }
       })
+    },
+    tagsSelectionText() {
+      return this.newUser.permissions.selectedTagsNotAccessible ? this.$strings.LabelTagsNotAccessibleToUser : this.$strings.LabelTagsAccessibleToUser
+    },
+    hasOpenIDLink() {
+      return !!this.account?.hasOpenIDLink
     }
   },
   methods: {
@@ -192,9 +219,37 @@ export default {
       // Force close when navigating - used in UsersTable
       if (this.$refs.modal) this.$refs.modal.setHide()
     },
+    unlinkOpenID() {
+      const payload = {
+        message: this.$strings.MessageConfirmUnlinkOpenId,
+        callback: (confirmed) => {
+          if (confirmed) {
+            this.unlinkingFromOpenID = true
+            this.$axios
+              .$patch(`/api/users/${this.account.id}/openid-unlink`)
+              .then(() => {
+                this.$toast.success(this.$strings.ToastUnlinkOpenIdSuccess)
+                this.show = false
+              })
+              .catch((error) => {
+                console.error('Failed to unlink user from OpenID', error)
+                this.$toast.error(this.$strings.ToastUnlinkOpenIdFailed)
+              })
+              .finally(() => {
+                this.unlinkingFromOpenID = false
+              })
+          }
+        },
+        type: 'yesNo'
+      }
+      this.$store.commit('globals/setConfirmPrompt', payload)
+    },
     accessAllTagsToggled(val) {
-      if (val && this.newUser.itemTagsAccessible.length) {
-        this.newUser.itemTagsAccessible = []
+      if (val) {
+        if (this.newUser.itemTagsSelected?.length) {
+          this.newUser.itemTagsSelected = []
+        }
+        this.newUser.permissions.selectedTagsNotAccessible = false
       }
     },
     fetchAllTags() {
@@ -219,15 +274,15 @@ export default {
     },
     submitForm() {
       if (!this.newUser.username) {
-        this.$toast.error('Enter a username')
+        this.$toast.error(this.$strings.ToastNewUserUsernameError)
         return
       }
       if (!this.newUser.permissions.accessAllLibraries && !this.newUser.librariesAccessible.length) {
-        this.$toast.error('Must select at least one library')
+        this.$toast.error(this.$strings.ToastNewUserLibraryError)
         return
       }
-      if (!this.newUser.permissions.accessAllTags && !this.newUser.itemTagsAccessible.length) {
-        this.$toast.error('Must select at least one tag')
+      if (!this.newUser.permissions.accessAllTags && !this.newUser.itemTagsSelected.length) {
+        this.$toast.error(this.$strings.ToastNewUserTagError)
         return
       }
 
@@ -245,13 +300,12 @@ export default {
       if (account.type === 'root' && !account.isActive) return
 
       this.processing = true
-      console.log('Calling update', account)
       this.$axios
         .$patch(`/api/users/${this.account.id}`, account)
         .then((data) => {
           this.processing = false
           if (data.error) {
-            this.$toast.error(`${this.$strings.ToastAccountUpdateFailed}: ${data.error}`)
+            this.$toast.error(`${this.$strings.ToastFailedToUpdate}: ${data.error}`)
           } else {
             console.log('Account updated', data.user)
 
@@ -268,12 +322,12 @@ export default {
           this.processing = false
           console.error('Failed to update account', error)
           var errMsg = error.response ? error.response.data || '' : ''
-          this.$toast.error(errMsg || 'Failed to update account')
+          this.$toast.error(errMsg || this.$strings.ToastFailedToUpdate)
         })
     },
     submitCreateAccount() {
       if (!this.newUser.password) {
-        this.$toast.error('Must have a password, only root user can have an empty password')
+        this.$toast.error(this.$strings.ToastNewUserPasswordError)
         return
       }
 
@@ -284,9 +338,9 @@ export default {
         .then((data) => {
           this.processing = false
           if (data.error) {
-            this.$toast.error(`Failed to create account: ${data.error}`)
+            this.$toast.error(this.$strings.ToastNewUserCreatedFailed + ': ' + data.error)
           } else {
-            this.$toast.success('New account created')
+            this.$toast.success(this.$strings.ToastNewUserCreatedSuccess)
             this.show = false
           }
         })
@@ -306,27 +360,32 @@ export default {
         update: type === 'admin',
         delete: type === 'admin',
         upload: type === 'admin',
+        accessExplicitContent: type === 'admin',
         accessAllLibraries: true,
-        accessAllTags: true
+        accessAllTags: true,
+        selectedTagsNotAccessible: false,
+        createEreader: type === 'admin'
       }
     },
     init() {
       this.fetchAllTags()
-
       this.isNew = !this.account
+
       if (this.account) {
         this.newUser = {
           username: this.account.username,
+          email: this.account.email,
           password: this.account.password,
           type: this.account.type,
           isActive: this.account.isActive,
           permissions: { ...this.account.permissions },
           librariesAccessible: [...(this.account.librariesAccessible || [])],
-          itemTagsAccessible: [...(this.account.itemTagsAccessible || [])]
+          itemTagsSelected: [...(this.account.itemTagsSelected || [])]
         }
       } else {
         this.newUser = {
           username: null,
+          email: null,
           password: null,
           type: 'user',
           isActive: true,
@@ -336,9 +395,13 @@ export default {
             delete: false,
             upload: false,
             accessAllLibraries: true,
-            accessAllTags: true
+            accessAllTags: true,
+            accessExplicitContent: false,
+            selectedTagsNotAccessible: false,
+            createEreader: false
           },
-          librariesAccessible: []
+          librariesAccessible: [],
+          itemTagsSelected: []
         }
       }
     }

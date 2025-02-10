@@ -6,44 +6,106 @@
           <div class="pt-4">
             <h2 class="font-semibold">{{ $strings.HeaderSettingsGeneral }}</h2>
           </div>
-          <div class="flex items-end py-2">
-            <ui-toggle-switch labeledBy="settings-store-cover-with-items" v-model="newServerSettings.storeCoverWithItem" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('storeCoverWithItem', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsStoreCoversWithItemHelp">
+          <div role="article" :aria-label="$strings.LabelSettingsStoreCoversWithItemHelp" class="flex items-end py-2">
+            <ui-toggle-switch :label="$strings.LabelSettingsStoreCoversWithItem" v-model="newServerSettings.storeCoverWithItem" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('storeCoverWithItem', val)" />
+            <ui-tooltip aria-hidden="true" :text="$strings.LabelSettingsStoreCoversWithItemHelp">
               <p class="pl-4">
                 <span id="settings-store-cover-with-items">{{ $strings.LabelSettingsStoreCoversWithItem }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
+                <span class="material-symbols icon-text">info</span>
               </p>
             </ui-tooltip>
           </div>
 
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-store-metadata-with-items" v-model="newServerSettings.storeMetadataWithItem" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('storeMetadataWithItem', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsStoreMetadataWithItemHelp">
+          <div role="article" :aria-label="$strings.LabelSettingsStoreMetadataWithItemHelp" class="flex items-center py-2">
+            <ui-toggle-switch :label="$strings.LabelSettingsStoreMetadataWithItem" v-model="newServerSettings.storeMetadataWithItem" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('storeMetadataWithItem', val)" />
+            <ui-tooltip aria-hidden="true" :text="$strings.LabelSettingsStoreMetadataWithItemHelp">
               <p class="pl-4">
                 <span id="settings-store-metadata-with-items">{{ $strings.LabelSettingsStoreMetadataWithItem }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
+                <span class="material-symbols icon-text">info</span>
               </p>
             </ui-tooltip>
           </div>
 
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-sorting-ignore-prefixes" v-model="newServerSettings.sortingIgnorePrefix" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('sortingIgnorePrefix', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsSortingIgnorePrefixesHelp">
+          <div role="article" :aria-label="$strings.LabelSettingsSortingIgnorePrefixesHelp" class="flex items-center py-2">
+            <ui-toggle-switch :label="$strings.LabelSettingsSortingIgnorePrefixes" v-model="newServerSettings.sortingIgnorePrefix" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('sortingIgnorePrefix', val)" />
+            <ui-tooltip aria-hidden="true" :text="$strings.LabelSettingsSortingIgnorePrefixesHelp">
               <p class="pl-4">
                 <span id="settings-sorting-ignore-prefixes">{{ $strings.LabelSettingsSortingIgnorePrefixes }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
+                <span class="material-symbols icon-text">info</span>
               </p>
             </ui-tooltip>
           </div>
           <div v-if="newServerSettings.sortingIgnorePrefix" class="w-72 ml-14 mb-2">
-            <ui-multi-select v-model="newServerSettings.sortingPrefixes" small :items="newServerSettings.sortingPrefixes" :label="$strings.LabelPrefixesToIgnore" @input="updateSortingPrefixes" :disabled="updatingServerSettings" />
+            <ui-multi-select v-model="newServerSettings.sortingPrefixes" small :items="newServerSettings.sortingPrefixes" :label="$strings.LabelPrefixesToIgnore" @input="sortingPrefixesUpdated" :disabled="savingPrefixes" />
+            <div class="flex justify-end py-1">
+              <ui-btn v-if="hasPrefixesChanged" color="success" :loading="savingPrefixes" small @click="updateSortingPrefixes">Save</ui-btn>
+            </div>
+          </div>
+
+          <div class="pt-4">
+            <h2 class="font-semibold">{{ $strings.HeaderSettingsScanner }}</h2>
+          </div>
+
+          <div role="article" :aria-label="$strings.LabelSettingsParseSubtitlesHelp" class="flex items-center py-2">
+            <ui-toggle-switch :label="$strings.LabelSettingsParseSubtitles" v-model="newServerSettings.scannerParseSubtitle" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerParseSubtitle', val)" />
+            <ui-tooltip aria-hidden="true" :text="$strings.LabelSettingsParseSubtitlesHelp">
+              <p class="pl-4">
+                <span id="settings-parse-subtitles">{{ $strings.LabelSettingsParseSubtitles }}</span>
+                <span class="material-symbols icon-text">info</span>
+              </p>
+            </ui-tooltip>
+          </div>
+
+          <div role="article" :aria-label="$strings.LabelSettingsFindCoversHelp" class="flex items-center py-2">
+            <ui-toggle-switch :label="$strings.LabelSettingsFindCovers" v-model="newServerSettings.scannerFindCovers" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerFindCovers', val)" />
+            <ui-tooltip aria-hidden="true" :text="$strings.LabelSettingsFindCoversHelp">
+              <p class="pl-4">
+                <span id="settings-find-covers">{{ $strings.LabelSettingsFindCovers }}</span>
+                <span class="material-symbols icon-text">info</span>
+              </p>
+            </ui-tooltip>
+            <div class="flex-grow" />
+          </div>
+          <div v-if="newServerSettings.scannerFindCovers" class="w-44 ml-14 mb-2">
+            <ui-dropdown v-model="newServerSettings.scannerCoverProvider" small :items="providers" label="Cover Provider" @input="updateScannerCoverProvider" :disabled="updatingServerSettings" />
+          </div>
+
+          <div role="article" :aria-label="$strings.LabelSettingsPreferMatchedMetadataHelp" class="flex items-center py-2">
+            <ui-toggle-switch :label="$strings.LabelSettingsPreferMatchedMetadata" v-model="newServerSettings.scannerPreferMatchedMetadata" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerPreferMatchedMetadata', val)" />
+            <ui-tooltip aria-hidden="true" :text="$strings.LabelSettingsPreferMatchedMetadataHelp">
+              <p class="pl-4">
+                <span id="settings-prefer-matched-metadata">{{ $strings.LabelSettingsPreferMatchedMetadata }}</span>
+                <span class="material-symbols icon-text">info</span>
+              </p>
+            </ui-tooltip>
+          </div>
+
+          <div role="article" :aria-label="$strings.LabelSettingsEnableWatcherHelp" class="flex items-center py-2">
+            <ui-toggle-switch :label="$strings.LabelSettingsEnableWatcher" v-model="scannerEnableWatcher" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerDisableWatcher', !val)" />
+            <ui-tooltip aria-hidden="true" :text="$strings.LabelSettingsEnableWatcherHelp">
+              <p class="pl-4">
+                <span id="settings-disable-watcher">{{ $strings.LabelSettingsEnableWatcher }}</span>
+                <span class="material-symbols icon-text">info</span>
+              </p>
+            </ui-tooltip>
+          </div>
+
+          <div class="pt-4">
+            <h2 class="font-semibold">{{ $strings.HeaderSettingsWebClient }}</h2>
           </div>
 
           <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-chromecast-support" v-model="newServerSettings.chromecastEnabled" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('chromecastEnabled', val)" />
-            <p class="pl-4" id="settings-chromecast-support">{{ $strings.LabelSettingsChromecastSupport }}</p>
+            <ui-toggle-switch v-model="newServerSettings.chromecastEnabled" :label="$strings.LabelSettingsChromecastSupport" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('chromecastEnabled', val)" />
+            <p aria-hidden="true" class="pl-4">{{ $strings.LabelSettingsChromecastSupport }}</p>
           </div>
 
+          <div class="flex items-center py-2 mb-2">
+            <ui-toggle-switch v-model="newServerSettings.allowIframe" :label="$strings.LabelSettingsAllowIframe" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('allowIframe', val)" />
+            <p aria-hidden="true" class="pl-4">{{ $strings.LabelSettingsAllowIframe }}</p>
+          </div>
+        </div>
+
+        <div class="flex-1">
           <div class="pt-4">
             <h2 class="font-semibold">{{ $strings.HeaderSettingsDisplay }}</h2>
           </div>
@@ -53,7 +115,7 @@
             <ui-tooltip :text="$strings.LabelSettingsBookshelfViewHelp">
               <p class="pl-4">
                 <span id="settings-home-page-uses-bookshelf">{{ $strings.LabelSettingsHomePageBookshelfView }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
+                <span class="material-symbols icon-text">info</span>
               </p>
             </ui-tooltip>
           </div>
@@ -63,7 +125,7 @@
             <ui-tooltip :text="$strings.LabelSettingsBookshelfViewHelp">
               <p class="pl-4">
                 <span id="settings-library-uses-bookshelf">{{ $strings.LabelSettingsLibraryBookshelfView }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
+                <span class="material-symbols icon-text">info</span>
               </p>
             </ui-tooltip>
           </div>
@@ -81,88 +143,9 @@
           <div class="py-2">
             <ui-dropdown :label="$strings.LabelLanguageDefaultServer" ref="langDropdown" v-model="newServerSettings.language" :items="$languageCodeOptions" small class="max-w-52" @input="updateServerLanguage" />
           </div>
-        </div>
 
-        <div class="flex-1">
-          <div class="pt-4">
-            <h2 class="font-semibold">{{ $strings.HeaderSettingsScanner }}</h2>
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-parse-subtitles" v-model="newServerSettings.scannerParseSubtitle" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerParseSubtitle', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsParseSubtitlesHelp">
-              <p class="pl-4">
-                <span id="settings-parse-subtitles">{{ $strings.LabelSettingsParseSubtitles }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-find-covers" v-model="newServerSettings.scannerFindCovers" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerFindCovers', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsFindCoversHelp">
-              <p class="pl-4">
-                <span id="settings-find-covers">{{ $strings.LabelSettingsFindCovers }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
-              </p>
-            </ui-tooltip>
-            <div class="flex-grow" />
-          </div>
-          <div v-if="newServerSettings.scannerFindCovers" class="w-44 ml-14 mb-2">
-            <ui-dropdown v-model="newServerSettings.scannerCoverProvider" small :items="providers" label="Cover Provider" @input="updateScannerCoverProvider" :disabled="updatingServerSettings" />
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-overdrive-media-markers" v-model="newServerSettings.scannerPreferOverdriveMediaMarker" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerPreferOverdriveMediaMarker', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsOverdriveMediaMarkersHelp">
-              <p class="pl-4">
-                <span id="settings-overdrive-media-markers">{{ $strings.LabelSettingsOverdriveMediaMarkers }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-prefer-audio-metadata" v-model="newServerSettings.scannerPreferAudioMetadata" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerPreferAudioMetadata', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsPreferAudioMetadataHelp">
-              <p class="pl-4">
-                <span id="settings-prefer-audio-metadata">{{ $strings.LabelSettingsPreferAudioMetadata }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-prefer-opf-metadata" v-model="newServerSettings.scannerPreferOpfMetadata" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerPreferOpfMetadata', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsPreferOPFMetadataHelp">
-              <p class="pl-4">
-                <span id="settings-prefer-opf-metadata">{{ $strings.LabelSettingsPreferOPFMetadata }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-prefer-matched-metadata" v-model="newServerSettings.scannerPreferMatchedMetadata" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerPreferMatchedMetadata', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsPreferMatchedMetadataHelp">
-              <p class="pl-4">
-                <span id="settings-prefer-matched-metadata">{{ $strings.LabelSettingsPreferMatchedMetadata }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-disable-watcher" v-model="newServerSettings.scannerDisableWatcher" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerDisableWatcher', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsDisableWatcherHelp">
-              <p class="pl-4">
-                <span id="settings-disable-watcher">{{ $strings.LabelSettingsDisableWatcher }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <div class="pt-4">
+          <!-- old experimental features -->
+          <!-- <div class="pt-4">
             <h2 class="font-semibold">{{ $strings.HeaderSettingsExperimental }}</h2>
           </div>
 
@@ -172,28 +155,8 @@
               <p class="pl-4">
                 <span id="settings-experimental-features">{{ $strings.LabelSettingsExperimentalFeatures }}</span>
                 <a :aria-label="$strings.LabelSettingsExperimentalFeaturesHelp" href="https://github.com/advplyr/audiobookshelf/discussions/75" target="_blank">
-                  <span class="material-icons icon-text">info_outlined</span>
+                  <span class="material-symbols icon-text">info</span>
                 </a>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <div class="flex items-center py-2">
-            <ui-toggle-switch labeledBy="settings-enable-e-reader" v-model="newServerSettings.enableEReader" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('enableEReader', val)" />
-            <ui-tooltip :text="$strings.LabelSettingsEnableEReaderHelp">
-              <p class="pl-4">
-                <span id="settings-enable-e-reader">{{ $strings.LabelSettingsEnableEReader }}</span>
-                <span class="material-icons icon-text">info_outlined</span>
-              </p>
-            </ui-tooltip>
-          </div>
-
-          <!-- <div class="flex items-center py-2">
-            <ui-toggle-switch v-model="newServerSettings.scannerUseTone" :disabled="updatingServerSettings" @input="(val) => updateSettingsKey('scannerUseTone', val)" />
-            <ui-tooltip text="Tone library for metadata">
-              <p class="pl-4">
-                Use Tone library for metadata
-                <span class="material-icons icon-text">info_outlined</span>
               </p>
             </ui-tooltip>
           </div> -->
@@ -207,7 +170,6 @@
       <div class="flex-grow" />
       <ui-btn color="bg" small :padding-x="4" class="mr-2 text-xs md:text-sm" :loading="isPurgingCache" @click.stop="purgeCache">{{ $strings.ButtonPurgeAllCache }}</ui-btn>
       <ui-btn color="bg" small :padding-x="4" class="mr-2 text-xs md:text-sm" :loading="isPurgingCache" @click.stop="purgeItemsCache">{{ $strings.ButtonPurgeItemsCache }}</ui-btn>
-      <ui-btn color="bg" small :padding-x="4" class="mr-2 text-xs md:text-sm" :loading="isResettingLibraryItems" @click="resetLibraryItems">{{ $strings.ButtonRemoveAllLibraryItems }}</ui-btn>
     </div>
 
     <div class="flex items-center py-4">
@@ -225,9 +187,9 @@
       </a>
       <p class="pl-4 pr-2 text-sm text-yellow-400">
         {{ $strings.MessageJoinUsOn }}
-        <a class="underline" href="https://discord.gg/pJsjuNCKRq" target="_blank">discord</a>
+        <a class="underline" href="https://discord.gg/HQgCbd6E75" target="_blank">discord</a>
       </p>
-      <a href="https://discord.gg/pJsjuNCKRq" target="_blank" class="text-white hover:text-gray-200 hover:scale-150 hover:rotate-6 transform duration-500">
+      <a href="https://discord.gg/HQgCbd6E75" target="_blank" class="text-white hover:text-gray-200 hover:scale-150 hover:rotate-6 transform duration-500">
         <svg width="31" height="24" viewBox="0 0 71 55" fill="none" xmlns="http://www.w3.org/2000/svg">
           <g clip-path="url(#clip0)">
             <path
@@ -246,16 +208,15 @@
 
     <div class="h-0.5 bg-primary bg-opacity-30 w-full" />
 
+    <!-- confirm cache purge dialog -->
     <prompt-dialog v-model="showConfirmPurgeCache" :width="675">
       <div class="px-4 w-full text-sm py-6 rounded-lg bg-bg shadow-lg border border-black-300">
-        <p class="text-error font-semibold">Important Notice!</p>
-        <p class="my-2 text-center">Purge cache will delete the entire directory at <span class="font-mono">/metadata/cache</span>.</p>
-
-        <p class="text-center mb-8">Are you sure you want to remove the cache directory?</p>
+        <p class="text-error font-semibold">{{ $strings.MessageImportantNotice }}</p>
+        <p class="my-8 text-center" v-html="$strings.MessageConfirmPurgeCache" />
         <div class="flex px-1 items-center">
-          <ui-btn color="primary" @click="showConfirmPurgeCache = false">Nevermind</ui-btn>
+          <ui-btn color="primary" @click="showConfirmPurgeCache = false">{{ $strings.ButtonNevermind }}</ui-btn>
           <div class="flex-grow" />
-          <ui-btn color="success" @click="confirmPurge">Yes, Purge!</ui-btn>
+          <ui-btn color="success" @click="confirmPurge">{{ $strings.ButtonYes }}</ui-btn>
         </div>
       </div>
     </prompt-dialog>
@@ -264,15 +225,23 @@
 
 <script>
 export default {
+  asyncData({ store, redirect }) {
+    if (!store.getters['user/getIsAdminOrUp']) {
+      redirect('/')
+    }
+  },
   data() {
     return {
       isResettingLibraryItems: false,
       updatingServerSettings: false,
       homepageUseBookshelfView: false,
       useBookshelfView: false,
+      scannerEnableWatcher: false,
       isPurgingCache: false,
+      hasPrefixesChanged: false,
       newServerSettings: {},
-      showConfirmPurgeCache: false
+      showConfirmPurgeCache: false,
+      savingPrefixes: false
     }
   },
   watch: {
@@ -288,14 +257,6 @@ export default {
     },
     providers() {
       return this.$store.state.scanners.providers
-    },
-    showExperimentalFeatures: {
-      get() {
-        return this.$store.state.showExperimentalFeatures
-      },
-      set(val) {
-        this.$store.commit('setExperimentalFeatures', val)
-      }
     },
     dateFormats() {
       return this.$store.state.globals.dateFormats
@@ -313,15 +274,36 @@ export default {
     }
   },
   methods: {
-    updateSortingPrefixes(val) {
-      if (!val || !val.length) {
-        this.$toast.error('Must have at least 1 prefix')
+    sortingPrefixesUpdated(val) {
+      const prefixes = [...new Set(val?.map((prefix) => prefix.trim().toLowerCase()) || [])]
+      this.newServerSettings.sortingPrefixes = prefixes
+      const serverPrefixes = this.serverSettings.sortingPrefixes || []
+      this.hasPrefixesChanged = prefixes.some((p) => !serverPrefixes.includes(p)) || serverPrefixes.some((p) => !prefixes.includes(p))
+    },
+    updateSortingPrefixes() {
+      const prefixes = [...new Set(this.newServerSettings.sortingPrefixes.map((prefix) => prefix.trim().toLowerCase()) || [])]
+      if (!prefixes.length) {
+        this.$toast.error(this.$strings.ToastSortingPrefixesEmptyError)
         return
       }
-      var prefixes = val.map((prefix) => prefix.trim().toLowerCase())
-      this.updateServerSettings({
-        sortingPrefixes: prefixes
-      })
+
+      this.savingPrefixes = true
+      this.$axios
+        .$patch(`/api/sorting-prefixes`, { sortingPrefixes: prefixes })
+        .then((data) => {
+          this.$toast.success(this.$getString('ToastSortingPrefixesUpdateSuccess', [data.rowsUpdated]))
+          if (data.serverSettings) {
+            this.$store.commit('setServerSettings', data.serverSettings)
+          }
+          this.hasPrefixesChanged = false
+        })
+        .catch((error) => {
+          console.error('Failed to update prefixes', error)
+          this.$toast.error(this.$strings.ToastFailedToUpdate)
+        })
+        .finally(() => {
+          this.savingPrefixes = false
+        })
     },
     updateScannerCoverProvider(val) {
       this.updateServerSettings({
@@ -342,53 +324,38 @@ export default {
       this.updateSettingsKey('language', val)
     },
     updateSettingsKey(key, val) {
+      if (key === 'scannerDisableWatcher') {
+        this.newServerSettings.scannerDisableWatcher = val
+      }
       this.updateServerSettings({
         [key]: val
       })
     },
     updateServerSettings(payload) {
       this.updatingServerSettings = true
-      this.$store
-        .dispatch('updateServerSettings', payload)
-        .then((success) => {
-          console.log('Updated Server Settings', success)
-          this.updatingServerSettings = false
-          this.$toast.success('Server settings updated')
+      this.$store.dispatch('updateServerSettings', payload).then((response) => {
+        this.updatingServerSettings = false
 
-          if (payload.language) {
-            // Updating language after save allows for re-rendering
-            this.$setLanguageCode(payload.language)
-          }
-        })
-        .catch((error) => {
-          console.error('Failed to update server settings', error)
-          this.updatingServerSettings = false
-          this.$toast.error('Failed to update server settings')
-        })
+        if (response.error) {
+          console.error('Failed to update server settins', response.error)
+          this.$toast.error(response.error)
+          this.initServerSettings()
+          return
+        }
+
+        if (payload.language) {
+          // Updating language after save allows for re-rendering
+          this.$setLanguageCode(payload.language)
+        }
+      })
     },
     initServerSettings() {
       this.newServerSettings = this.serverSettings ? { ...this.serverSettings } : {}
       this.newServerSettings.sortingPrefixes = [...(this.newServerSettings.sortingPrefixes || [])]
+      this.scannerEnableWatcher = !this.newServerSettings.scannerDisableWatcher
 
       this.homepageUseBookshelfView = this.newServerSettings.homeBookshelfView != this.$constants.BookshelfView.DETAIL
       this.useBookshelfView = this.newServerSettings.bookshelfView != this.$constants.BookshelfView.DETAIL
-    },
-    resetLibraryItems() {
-      if (confirm(this.$strings.MessageRemoveAllItemsWarning)) {
-        this.isResettingLibraryItems = true
-        this.$axios
-          .$delete('/api/items/all')
-          .then(() => {
-            this.isResettingLibraryItems = false
-            this.$toast.success('Successfully reset items')
-            location.reload()
-          })
-          .catch((error) => {
-            console.error('failed to reset items', error)
-            this.isResettingLibraryItems = false
-            this.$toast.error('Failed to reset items - manually remove the /config/libraryItems folder')
-          })
-      }
     },
     purgeCache() {
       this.showConfirmPurgeCache = true
@@ -399,17 +366,18 @@ export default {
       await this.$axios
         .$post('/api/cache/purge')
         .then(() => {
-          this.$toast.success('Cache Purged!')
+          this.$toast.success(this.$strings.ToastCachePurgeSuccess)
         })
         .catch((error) => {
           console.error('Failed to purge cache', error)
-          this.$toast.error('Failed to purge cache')
+          this.$toast.error(this.$strings.ToastCachePurgeFailed)
         })
       this.isPurgingCache = false
     },
     purgeItemsCache() {
       const payload = {
-        message: `<span class="text-warning text-base">Warning! This will delete the entire folder at /metadata/cache/items.</span><br />Are you sure you want to purge items cache?`,
+        // message: `This will delete the entire folder at <code>/metadata/cache/items</code>.<br />Are you sure you want to purge items cache?`,
+        message: this.$strings.MessageConfirmPurgeItemsCache,
         callback: (confirmed) => {
           if (confirmed) {
             this.sendPurgeItemsCache()
@@ -424,11 +392,11 @@ export default {
       await this.$axios
         .$post('/api/cache/items/purge')
         .then(() => {
-          this.$toast.success('Items Cache Purged!')
+          this.$toast.success(this.$strings.ToastCachePurgeSuccess)
         })
         .catch((error) => {
           console.error('Failed to purge items cache', error)
-          this.$toast.error('Failed to purge items cache')
+          this.$toast.error(this.$strings.ToastCachePurgeFailed)
         })
       this.isPurgingCache = false
     }

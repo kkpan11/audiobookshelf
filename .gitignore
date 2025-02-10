@@ -7,11 +7,19 @@
 /podcasts/
 /media/
 /metadata/
-test/
+/plugins/
 /client/.nuxt/
 /client/dist/
 /dist/
 /deploy/
+/coverage/
+/.nyc_output/
+/ffmpeg*
+/ffprobe*
+/unicode*
+/libnusqlite3*
 
 sw.*
 .DS_STORE
+.idea/*
+tailwind.compiled.css

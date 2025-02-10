@@ -2,24 +2,24 @@
   <modals-modal v-model="show" name="edit-book" :width="800" :height="height" :processing="processing" :content-margin-top="marginTop">
     <template #outer>
       <div class="absolute top-0 left-0 p-4 landscape:px-4 landscape:py-2 md:portrait:p-5 lg:p-5 w-2/3 overflow-hidden pointer-events-none">
-        <p class="text-xl md:portrait:text-3xl md:landscape:text-lg lg:text-3xl text-white truncate pointer-events-none">{{ title }}</p>
+        <h1 class="text-xl md:portrait:text-3xl md:landscape:text-lg lg:text-3xl text-white truncate pointer-events-none">{{ title }}</h1>
       </div>
     </template>
-    <div class="absolute -top-10 left-0 z-10 w-full flex">
+    <div role="tablist" class="absolute -top-10 left-0 z-10 w-full flex">
       <template v-for="tab in availableTabs">
-        <div :key="tab.id" class="w-28 rounded-t-lg flex items-center justify-center mr-0.5 sm:mr-1 cursor-pointer hover:bg-bg border-t border-l border-r border-black-300 tab text-xs sm:text-base" :class="selectedTab === tab.id ? 'tab-selected bg-bg pb-px' : 'bg-primary text-gray-400'" @click="selectTab(tab.id)">{{ tab.title }}</div>
+        <button :key="tab.id" role="tab" class="w-28 rounded-t-lg flex items-center justify-center mr-0.5 sm:mr-1 cursor-pointer hover:bg-bg border-t border-l border-r border-black-300 tab text-xs sm:text-base" :class="selectedTab === tab.id ? 'tab-selected bg-bg pb-px' : 'bg-primary text-gray-400'" @click="selectTab(tab.id)">{{ tab.title }}</button>
       </template>
     </div>
 
-    <div v-show="canGoPrev" class="absolute -left-24 top-0 bottom-0 h-full pointer-events-none flex items-center px-6">
-      <div class="material-icons text-5xl text-white text-opacity-50 hover:text-opacity-90 cursor-pointer pointer-events-auto" @click.stop.prevent="goPrevBook" @mousedown.prevent>arrow_back_ios</div>
-    </div>
-    <div v-show="canGoNext" class="absolute -right-24 top-0 bottom-0 h-full pointer-events-none flex items-center px-6">
-      <div class="material-icons text-5xl text-white text-opacity-50 hover:text-opacity-90 cursor-pointer pointer-events-auto" @click.stop.prevent="goNextBook" @mousedown.prevent>arrow_forward_ios</div>
+    <div role="tabpanel" class="w-full h-full max-h-full text-sm rounded-b-lg rounded-tr-lg bg-bg shadow-lg border border-black-300 relative">
+      <component v-if="libraryItem && show" :is="tabName" :library-item="libraryItem" :processing.sync="processing" @close="show = false" @selectTab="selectTab" />
     </div>
 
-    <div class="w-full h-full max-h-full text-sm rounded-b-lg rounded-tr-lg bg-bg shadow-lg border border-black-300 relative">
-      <component v-if="libraryItem && show" :is="tabName" :library-item="libraryItem" :processing.sync="processing" @close="show = false" @selectTab="selectTab" />
+    <div v-show="canGoPrev" class="absolute -left-24 top-0 bottom-0 h-full pointer-events-none flex items-center px-6">
+      <button class="material-symbols text-5xl text-white text-opacity-50 hover:text-opacity-90 cursor-pointer pointer-events-auto" :aria-label="$strings.ButtonNext" @click.stop.prevent="goPrevBook" @mousedown.prevent>arrow_back_ios</button>
+    </div>
+    <div v-show="canGoNext" class="absolute -right-24 top-0 bottom-0 h-full pointer-events-none flex items-center px-6">
+      <button class="material-symbols text-5xl text-white text-opacity-50 hover:text-opacity-90 cursor-pointer pointer-events-auto" :aria-label="$strings.ButtonPrevious" @click.stop.prevent="goNextBook" @mousedown.prevent>arrow_forward_ios</button>
     </div>
   </modals-modal>
 </template>
@@ -74,6 +74,9 @@ export default {
         this.$store.commit('setEditModalTab', val)
       }
     },
+    height() {
+      return Math.min(this.availableHeight, 650)
+    },
     tabs() {
       return [
         {
@@ -124,9 +127,6 @@ export default {
         }
       ]
     },
-    showExperimentalFeatures() {
-      return this.$store.state.showExperimentalFeatures
-    },
     userCanUpdate() {
       return this.$store.getters['user/getUserCanUpdate']
     },
@@ -136,23 +136,32 @@ export default {
     userIsAdminOrUp() {
       return this.$store.getters['user/getIsAdminOrUp']
     },
+    selectedLibraryItem() {
+      return this.$store.state.selectedLibraryItem || {}
+    },
+    selectedLibraryItemId() {
+      return this.selectedLibraryItem.id
+    },
+    media() {
+      return this.libraryItem?.media || {}
+    },
+    mediaMetadata() {
+      return this.media.metadata || {}
+    },
     availableTabs() {
       if (!this.userCanUpdate && !this.userCanDownload) return []
       return this.tabs.filter((tab) => {
-        if (tab.experimental && !this.showExperimentalFeatures) return false
         if (tab.mediaType && this.mediaType !== tab.mediaType) return false
         if (tab.admin && !this.userIsAdminOrUp) return false
 
         if (tab.id === 'tools' && this.isMissing) return false
+        if (tab.id === 'chapters' && this.isEBookOnly) return false
 
         if ((tab.id === 'tools' || tab.id === 'files') && this.userCanDownload) return true
         if (tab.id !== 'tools' && tab.id !== 'files' && this.userCanUpdate) return true
         if (tab.id === 'match' && this.userCanUpdate) return true
         return false
       })
-    },
-    height() {
-      return Math.min(this.availableHeight, 650)
     },
     tabName() {
       var _tab = this.tabs.find((t) => t.id === this.selectedTab)
@@ -161,20 +170,11 @@ export default {
     isMissing() {
       return this.selectedLibraryItem.isMissing
     },
-    selectedLibraryItem() {
-      return this.$store.state.selectedLibraryItem || {}
-    },
-    selectedLibraryItemId() {
-      return this.selectedLibraryItem.id
-    },
-    media() {
-      return this.libraryItem ? this.libraryItem.media || {} : {}
-    },
-    mediaMetadata() {
-      return this.media.metadata || {}
+    isEBookOnly() {
+      return this.media.ebookFile && !this.media.tracks?.length
     },
     mediaType() {
-      return this.libraryItem ? this.libraryItem.mediaType : null
+      return this.libraryItem?.mediaType || null
     },
     title() {
       return this.mediaMetadata.title || 'No Title'
@@ -196,6 +196,9 @@ export default {
   methods: {
     async goPrevBook() {
       if (this.currentBookshelfIndex - 1 < 0) return
+      // Remove focus from active input
+      document.activeElement?.blur?.()
+
       var prevBookId = this.bookshelfBookIds[this.currentBookshelfIndex - 1]
       this.processing = true
       var prevBook = await this.$axios.$get(`/api/items/${prevBookId}?expanded=1`).catch((error) => {
@@ -215,6 +218,9 @@ export default {
     },
     async goNextBook() {
       if (this.currentBookshelfIndex >= this.bookshelfBookIds.length - 1) return
+      // Remove focus from active input
+      document.activeElement?.blur?.()
+
       this.processing = true
       var nextBookId = this.bookshelfBookIds[this.currentBookshelfIndex + 1]
       var nextBook = await this.$axios.$get(`/api/items/${nextBookId}?expanded=1`).catch((error) => {

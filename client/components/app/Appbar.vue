@@ -1,13 +1,13 @@
 <template>
   <div class="w-full h-16 bg-primary relative">
-    <div id="appbar" class="absolute top-0 bottom-0 left-0 w-full h-full px-2 md:px-6 py-1 z-60">
+    <div id="appbar" role="toolbar" aria-label="Appbar" class="absolute top-0 bottom-0 left-0 w-full h-full px-2 md:px-6 py-1 z-60">
       <div class="flex h-full items-center">
         <nuxt-link to="/">
           <img src="~static/icon.svg" :alt="$strings.ButtonHome" class="w-8 min-w-8 h-8 mr-2 sm:w-10 sm:min-w-10 sm:h-10 sm:mr-4" />
         </nuxt-link>
 
         <nuxt-link to="/">
-          <h1 class="text-xl mr-6 hidden lg:block hover:underline">audiobookshelf <span v-if="showExperimentalFeatures" class="material-icons text-lg text-warning pr-1">logo_dev</span></h1>
+          <h1 class="text-xl mr-6 hidden lg:block hover:underline">audiobookshelf</h1>
         </nuxt-link>
 
         <ui-libraries-dropdown class="mr-2" />
@@ -15,30 +15,30 @@
         <controls-global-search v-if="currentLibrary" class="mr-1 sm:mr-0" />
         <div class="flex-grow" />
 
-        <widgets-notification-widget class="hidden md:block" />
-
         <ui-tooltip v-if="isChromecastInitialized && !isHttps" direction="bottom" text="Casting requires a secure connection" class="flex items-center">
-          <span class="material-icons-outlined text-2xl text-warning text-opacity-50"> cast </span>
+          <span class="material-symbols text-2xl text-warning text-opacity-50"> cast </span>
         </ui-tooltip>
         <div v-if="isChromecastInitialized" class="w-6 min-w-6 h-6 ml-2 mr-1 sm:mx-2 cursor-pointer">
           <google-cast-launcher></google-cast-launcher>
         </div>
 
+        <widgets-notification-widget class="hidden md:block" />
+
         <nuxt-link v-if="currentLibrary" to="/config/stats" class="hover:text-gray-200 cursor-pointer w-8 h-8 hidden sm:flex items-center justify-center mx-1">
           <ui-tooltip :text="$strings.HeaderYourStats" direction="bottom" class="flex items-center">
-            <span class="material-icons text-2xl" aria-label="User Stats" role="button">equalizer</span>
+            <span class="material-symbols text-2xl" aria-label="User Stats" role="button">&#xe01d;</span>
           </ui-tooltip>
         </nuxt-link>
 
         <nuxt-link v-if="userCanUpload && currentLibrary" to="/upload" class="hover:text-gray-200 cursor-pointer w-8 h-8 flex items-center justify-center mx-1">
           <ui-tooltip :text="$strings.ButtonUpload" direction="bottom" class="flex items-center">
-            <span class="material-icons text-2xl" aria-label="Upload Media" role="button">upload</span>
+            <span class="material-symbols text-2xl" aria-label="Upload Media" role="button">&#xf09b;</span>
           </ui-tooltip>
         </nuxt-link>
 
         <nuxt-link v-if="userIsAdminOrUp" to="/config" class="hover:text-gray-200 cursor-pointer w-8 h-8 flex items-center justify-center mx-1">
           <ui-tooltip :text="$strings.HeaderSettings" direction="bottom" class="flex items-center">
-            <span class="material-icons text-2xl" aria-label="System Settings" role="button">settings</span>
+            <span class="material-symbols text-2xl" aria-label="System Settings" role="button">&#xe8b8;</span>
           </ui-tooltip>
         </nuxt-link>
 
@@ -47,7 +47,7 @@
             <span class="block truncate">{{ username }}</span>
           </span>
           <span class="h-full md:ml-3 md:absolute inset-y-0 md:right-0 flex items-center justify-center md:pr-2 pointer-events-none">
-            <span class="material-icons text-xl text-gray-100">person</span>
+            <span class="material-symbols text-xl text-gray-100">&#xe7fd;</span>
           </span>
         </nuxt-link>
       </div>
@@ -55,7 +55,7 @@
         <h1 class="text-lg md:text-2xl px-4">{{ $getString('MessageItemsSelected', [numMediaItemsSelected]) }}</h1>
         <div class="flex-grow" />
         <ui-btn v-if="!isPodcastLibrary && selectedMediaItemsArePlayable" color="success" :padding-x="4" small class="flex items-center h-9 mr-2" @click="playSelectedItems">
-          <span class="material-icons text-2xl -ml-2 pr-1 text-white">play_arrow</span>
+          <span class="material-symbols fill text-2xl -ml-2 pr-1 text-white">play_arrow</span>
           {{ $strings.ButtonPlay }}
         </ui-btn>
         <ui-tooltip v-if="isBookLibrary" :text="selectedIsFinished ? $strings.MessageMarkAsNotFinished : $strings.MessageMarkAsFinished" direction="bottom">
@@ -76,7 +76,7 @@
         <ui-context-menu-dropdown v-if="contextMenuItems.length && !processingBatch" :items="contextMenuItems" class="ml-1" @action="contextMenuAction" />
 
         <ui-tooltip :text="$strings.LabelDeselectAll" direction="bottom" class="flex items-center">
-          <span class="material-icons text-3xl px-4 hover:text-gray-100 cursor-pointer" :class="processingBatch ? 'text-gray-400' : ''" @click="cancelSelectionMode">close</span>
+          <span class="material-symbols text-3xl px-4 hover:text-gray-100 cursor-pointer" :class="processingBatch ? 'text-gray-400' : ''" @click="cancelSelectionMode">close</span>
         </ui-tooltip>
       </div>
     </div>
@@ -149,9 +149,6 @@ export default {
     processingBatch() {
       return this.$store.state.processingBatch
     },
-    showExperimentalFeatures() {
-      return this.$store.state.showExperimentalFeatures
-    },
     isChromecastEnabled() {
       return this.$store.getters['getServerSetting']('chromecastEnabled')
     },
@@ -173,10 +170,15 @@ export default {
 
       if (!this.isPodcastLibrary && this.selectedMediaItemsArePlayable) {
         options.push({
-          text: 'Quick Embed Metadata',
+          text: this.$strings.ButtonQuickEmbedMetadata,
           action: 'quick-embed'
         })
       }
+
+      options.push({
+        text: this.$strings.ButtonReScan,
+        action: 'rescan'
+      })
 
       return options
     }
@@ -184,7 +186,7 @@ export default {
   methods: {
     requestBatchQuickEmbed() {
       const payload = {
-        message: 'Warning! Quick embed will not backup your audio files. Make sure that you have a backup of your audio files. <br><br>Would you like to continue?',
+        message: this.$strings.MessageConfirmQuickEmbed,
         callback: (confirmed) => {
           if (confirmed) {
             this.$axios
@@ -206,12 +208,38 @@ export default {
       }
       this.$store.commit('globals/setConfirmPrompt', payload)
     },
-    contextMenuAction(action) {
+    contextMenuAction({ action }) {
       if (action === 'quick-embed') {
         this.requestBatchQuickEmbed()
       } else if (action === 'quick-match') {
         this.batchAutoMatchClick()
+      } else if (action === 'rescan') {
+        this.batchRescan()
       }
+    },
+    async batchRescan() {
+      const payload = {
+        message: this.$getString('MessageConfirmReScanLibraryItems', [this.selectedMediaItems.length]),
+        callback: (confirmed) => {
+          if (confirmed) {
+            this.$axios
+              .$post(`/api/items/batch/scan`, {
+                libraryItemIds: this.selectedMediaItems.map((i) => i.id)
+              })
+              .then(() => {
+                console.log('Batch Re-Scan started')
+                this.cancelSelectionMode()
+              })
+              .catch((error) => {
+                console.error('Batch Re-Scan failed', error)
+                const errorMsg = error.response.data || 'Failed to batch re-scan'
+                this.$toast.error(errorMsg)
+              })
+          }
+        },
+        type: 'yesNo'
+      }
+      this.$store.commit('globals/setConfirmPrompt', payload)
     },
     async playSelectedItems() {
       this.$store.commit('setProcessingBatch', true)
@@ -236,7 +264,6 @@ export default {
       libraryItems.forEach((item) => {
         let subtitle = ''
         if (item.mediaType === 'book') subtitle = item.media.metadata.authors.map((au) => au.name).join(', ')
-        else if (item.mediaType === 'music') subtitle = item.media.metadata.artists.join(', ')
         queueItems.push({
           libraryItemId: item.id,
           libraryId: item.libraryId,
@@ -275,38 +302,51 @@ export default {
       this.$axios
         .patch(`/api/me/progress/batch/update`, updateProgressPayloads)
         .then(() => {
-          this.$toast.success('Batch update success!')
+          this.$toast.success(this.$strings.ToastBatchUpdateSuccess)
           this.$store.commit('setProcessingBatch', false)
           this.$store.commit('globals/resetSelectedMediaItems', [])
           this.$eventBus.$emit('bookshelf_clear_selection')
         })
         .catch((error) => {
-          this.$toast.error('Batch update failed')
+          this.$toast.error(this.$strings.ToastBatchUpdateFailed)
           console.error('Failed to batch update read/not read', error)
           this.$store.commit('setProcessingBatch', false)
         })
     },
     batchDeleteClick() {
-      const audiobookText = this.numMediaItemsSelected > 1 ? `these ${this.numMediaItemsSelected} items` : 'this item'
-      const confirmMsg = `Are you sure you want to remove ${audiobookText}?\n\n*Does not delete your files, only removes the items from Audiobookshelf`
-      if (confirm(confirmMsg)) {
-        this.$store.commit('setProcessingBatch', true)
-        this.$axios
-          .$post(`/api/items/batch/delete`, {
-            libraryItemIds: this.selectedMediaItems.map((i) => i.id)
-          })
-          .then(() => {
-            this.$toast.success('Batch delete success!')
-            this.$store.commit('setProcessingBatch', false)
-            this.$store.commit('globals/resetSelectedMediaItems', [])
-            this.$eventBus.$emit('bookshelf_clear_selection')
-          })
-          .catch((error) => {
-            this.$toast.error('Batch delete failed')
-            console.error('Failed to batch delete', error)
-            this.$store.commit('setProcessingBatch', false)
-          })
+      const payload = {
+        message: this.$getString('MessageConfirmDeleteLibraryItems', [this.numMediaItemsSelected]),
+        checkboxLabel: this.$strings.LabelDeleteFromFileSystemCheckbox,
+        yesButtonText: this.$strings.ButtonDelete,
+        yesButtonColor: 'error',
+        checkboxDefaultValue: !Number(localStorage.getItem('softDeleteDefault') || 0),
+        callback: (confirmed, hardDelete) => {
+          if (confirmed) {
+            localStorage.setItem('softDeleteDefault', hardDelete ? 0 : 1)
+
+            this.$store.commit('setProcessingBatch', true)
+
+            this.$axios
+              .$post(`/api/items/batch/delete?hard=${hardDelete ? 1 : 0}`, {
+                libraryItemIds: this.selectedMediaItems.map((i) => i.id)
+              })
+              .then(() => {
+                this.$toast.success(this.$strings.ToastBatchDeleteSuccess)
+                this.$store.commit('globals/resetSelectedMediaItems', [])
+                this.$eventBus.$emit('bookshelf_clear_selection')
+              })
+              .catch((error) => {
+                console.error('Batch delete failed', error)
+                this.$toast.error(this.$strings.ToastBatchDeleteFailed)
+              })
+              .finally(() => {
+                this.$store.commit('setProcessingBatch', false)
+              })
+          }
+        },
+        type: 'yesNo'
       }
+      this.$store.commit('globals/setConfirmPrompt', payload)
     },
     batchEditClick() {
       this.$router.push('/batch')

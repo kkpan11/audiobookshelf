@@ -1,33 +1,34 @@
 <template>
-  <div class="w-full" v-click-outside="closeMenu">
+  <div class="w-full" v-click-outside="clickOutsideObj">
     <p class="px-1 text-sm font-semibold">{{ label }}</p>
     <div ref="wrapper" class="relative">
       <div ref="inputWrapper" style="min-height: 40px" class="flex-wrap relative w-full shadow-sm flex items-center bg-primary border border-gray-600 rounded-md px-2 py-1 cursor-pointer" @click.stop.prevent="clickWrapper" @mouseup.stop.prevent @mousedown.prevent>
         <div v-for="item in selectedItems" :key="item.value" class="rounded-full px-2 py-1 ma-0.5 text-xs bg-bg flex flex-nowrap whitespace-nowrap items-center relative">
           <div class="w-full h-full rounded-full absolute top-0 left-0 opacity-0 hover:opacity-100 px-1 bg-bg bg-opacity-75 flex items-center justify-end cursor-pointer">
-            <span class="material-icons text-white hover:text-error" style="font-size: 1.1rem" @click.stop="removeItem(item.value)">close</span>
+            <span class="material-symbols text-white hover:text-error" style="font-size: 1.1rem" @click.stop="removeItem(item.value)">close</span>
           </div>
           {{ item.text }}
         </div>
       </div>
 
-      <ul ref="menu" v-show="showMenu" class="absolute z-60 mt-1 w-full bg-bg border border-black-200 shadow-lg max-h-56 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm" role="listbox" aria-labelledby="listbox-label">
-        <template v-for="item in items">
-          <li :key="item.value" class="text-gray-50 select-none relative py-2 pr-9 cursor-pointer hover:bg-black-400" role="option" @click="clickedOption($event, item)" @mouseup.stop.prevent @mousedown.prevent>
-            <div class="flex items-center">
-              <span class="font-normal ml-3 block truncate">{{ item.text }}</span>
+      <transition name="menu">
+        <ul ref="menu" v-show="showMenu" class="absolute z-60 -mt-px w-full bg-primary border border-black-200 shadow-lg max-h-56 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm" role="listbox" aria-labelledby="listbox-label">
+          <template v-for="item in items">
+            <li :key="item.value" class="text-gray-50 select-none relative py-2 pr-9 cursor-pointer hover:bg-black-400" role="option" @click="clickedOption($event, item)" @mouseup.stop.prevent @mousedown.prevent>
+              <p class="font-normal ml-3 block truncate">{{ item.text }}</p>
+
+              <div v-if="selected.includes(item.value)" class="text-yellow-400 absolute inset-y-0 right-0 my-auto w-5 h-5 mr-3 overflow-hidden">
+                <span class="material-symbols text-xl">check</span>
+              </div>
+            </li>
+          </template>
+          <li v-if="!items.length" class="text-gray-50 select-none relative py-2 pr-9" role="option">
+            <div class="flex items-center justify-center">
+              <span class="font-normal">{{ $strings.MessageNoItems }}</span>
             </div>
-            <span v-if="selected.includes(item.value)" class="text-yellow-400 absolute inset-y-0 right-0 flex items-center pr-4">
-              <span class="material-icons text-xl">checkmark</span>
-            </span>
           </li>
-        </template>
-        <li v-if="!items.length" class="text-gray-50 select-none relative py-2 pr-9" role="option">
-          <div class="flex items-center justify-center">
-            <span class="font-normal">{{ $strings.MessageNoItems }}</span>
-          </div>
-        </li>
-      </ul>
+        </ul>
+      </transition>
     </div>
   </div>
 </template>
@@ -48,7 +49,12 @@ export default {
   data() {
     return {
       showMenu: false,
-      menu: null
+      menu: null,
+      clickOutsideObj: {
+        handler: this.closeMenu,
+        events: ['mousedown'],
+        isActive: true
+      }
     }
   },
   computed: {

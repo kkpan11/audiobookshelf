@@ -1,195 +1,346 @@
 const Path = require('path')
+const Sequelize = require('sequelize')
 const express = require('express')
 const http = require('http')
+const util = require('util')
 const fs = require('./libs/fsExtra')
 const fileUpload = require('./libs/expressFileupload')
-const rateLimit = require('./libs/expressRateLimit')
+const cookieParser = require('cookie-parser')
+const axios = require('axios')
 
 const { version } = require('../package.json')
 
 // Utils
-const dbMigration = require('./utils/dbMigration')
-const filePerms = require('./utils/filePerms')
 const fileUtils = require('./utils/fileUtils')
 const Logger = require('./Logger')
 
 const Auth = require('./Auth')
 const Watcher = require('./Watcher')
-const Scanner = require('./scanner/Scanner')
-const Db = require('./Db')
+const Database = require('./Database')
 const SocketAuthority = require('./SocketAuthority')
 
 const ApiRouter = require('./routers/ApiRouter')
 const HlsRouter = require('./routers/HlsRouter')
-const StaticRouter = require('./routers/StaticRouter')
+const PublicRouter = require('./routers/PublicRouter')
 
-const NotificationManager = require('./managers/NotificationManager')
-const CoverManager = require('./managers/CoverManager')
+const LogManager = require('./managers/LogManager')
+const EmailManager = require('./managers/EmailManager')
 const AbMergeManager = require('./managers/AbMergeManager')
 const CacheManager = require('./managers/CacheManager')
-const LogManager = require('./managers/LogManager')
 const BackupManager = require('./managers/BackupManager')
 const PlaybackSessionManager = require('./managers/PlaybackSessionManager')
 const PodcastManager = require('./managers/PodcastManager')
 const AudioMetadataMangaer = require('./managers/AudioMetadataManager')
 const RssFeedManager = require('./managers/RssFeedManager')
 const CronManager = require('./managers/CronManager')
-const TaskManager = require('./managers/TaskManager')
+const ApiCacheManager = require('./managers/ApiCacheManager')
+const BinaryManager = require('./managers/BinaryManager')
+const ShareManager = require('./managers/ShareManager')
+const LibraryScanner = require('./scanner/LibraryScanner')
+
+//Import the main Passport and Express-Session library
+const passport = require('passport')
+const expressSession = require('express-session')
+const MemoryStore = require('./libs/memorystore')
 
 class Server {
-  constructor(SOURCE, PORT, HOST, UID, GID, CONFIG_PATH, METADATA_PATH, ROUTER_BASE_PATH) {
+  constructor(SOURCE, PORT, HOST, CONFIG_PATH, METADATA_PATH, ROUTER_BASE_PATH) {
     this.Port = PORT
     this.Host = HOST
     global.Source = SOURCE
     global.isWin = process.platform === 'win32'
-    global.Uid = isNaN(UID) ? undefined : Number(UID)
-    global.Gid = isNaN(GID) ? undefined : Number(GID)
     global.ConfigPath = fileUtils.filePathToPOSIX(Path.normalize(CONFIG_PATH))
     global.MetadataPath = fileUtils.filePathToPOSIX(Path.normalize(METADATA_PATH))
     global.RouterBasePath = ROUTER_BASE_PATH
     global.XAccel = process.env.USE_X_ACCEL
+    global.AllowCors = process.env.ALLOW_CORS === '1'
+
+    if (process.env.EXP_PROXY_SUPPORT === '1') {
+      // https://github.com/advplyr/audiobookshelf/pull/3754
+      Logger.info(`[Server] Experimental Proxy Support Enabled, SSRF Request Filter was Disabled`)
+      global.DisableSsrfRequestFilter = () => true
+
+      axios.defaults.maxRedirects = 0
+      axios.interceptors.response.use(
+        (response) => response,
+        (error) => {
+          if ([301, 302].includes(error.response?.status)) {
+            return axios({
+              ...error.config,
+              url: error.response.headers.location
+            })
+          }
+
+          return Promise.reject(error)
+        }
+      )
+    } else if (process.env.DISABLE_SSRF_REQUEST_FILTER === '1') {
+      Logger.info(`[Server] SSRF Request Filter Disabled`)
+      global.DisableSsrfRequestFilter = () => true
+    } else if (process.env.SSRF_REQUEST_FILTER_WHITELIST?.length) {
+      const whitelistedUrls = process.env.SSRF_REQUEST_FILTER_WHITELIST.split(',').map((url) => url.trim())
+      if (whitelistedUrls.length) {
+        Logger.info(`[Server] SSRF Request Filter Whitelisting: ${whitelistedUrls.join(',')}`)
+        global.DisableSsrfRequestFilter = (url) => whitelistedUrls.includes(new URL(url).hostname)
+      }
+    }
+
+    if (process.env.PODCAST_DOWNLOAD_TIMEOUT) {
+      global.PodcastDownloadTimeout = process.env.PODCAST_DOWNLOAD_TIMEOUT
+    } else {
+      global.PodcastDownloadTimeout = 30000
+    }
 
     if (!fs.pathExistsSync(global.ConfigPath)) {
       fs.mkdirSync(global.ConfigPath)
-      filePerms.setDefaultDirSync(global.ConfigPath, false)
     }
     if (!fs.pathExistsSync(global.MetadataPath)) {
       fs.mkdirSync(global.MetadataPath)
-      filePerms.setDefaultDirSync(global.MetadataPath, false)
     }
 
-    this.db = new Db()
-    this.watcher = new Watcher()
-    this.auth = new Auth(this.db)
+    this.auth = new Auth()
 
     // Managers
-    this.taskManager = new TaskManager()
-    this.notificationManager = new NotificationManager(this.db)
-    this.backupManager = new BackupManager(this.db)
-    this.logManager = new LogManager(this.db)
-    this.cacheManager = new CacheManager()
-    this.abMergeManager = new AbMergeManager(this.db, this.taskManager)
-    this.playbackSessionManager = new PlaybackSessionManager(this.db)
-    this.coverManager = new CoverManager(this.db, this.cacheManager)
-    this.podcastManager = new PodcastManager(this.db, this.watcher, this.notificationManager, this.taskManager)
-    this.audioMetadataManager = new AudioMetadataMangaer(this.db, this.taskManager)
-    this.rssFeedManager = new RssFeedManager(this.db)
-
-    this.scanner = new Scanner(this.db, this.coverManager)
-    this.cronManager = new CronManager(this.db, this.scanner, this.podcastManager)
+    this.emailManager = new EmailManager()
+    this.backupManager = new BackupManager()
+    this.abMergeManager = new AbMergeManager()
+    this.playbackSessionManager = new PlaybackSessionManager()
+    this.podcastManager = new PodcastManager()
+    this.audioMetadataManager = new AudioMetadataMangaer()
+    this.cronManager = new CronManager(this.podcastManager, this.playbackSessionManager)
+    this.apiCacheManager = new ApiCacheManager()
+    this.binaryManager = new BinaryManager()
 
     // Routers
     this.apiRouter = new ApiRouter(this)
-    this.hlsRouter = new HlsRouter(this.db, this.auth, this.playbackSessionManager)
-    this.staticRouter = new StaticRouter(this.db)
+    this.hlsRouter = new HlsRouter(this.auth, this.playbackSessionManager)
+    this.publicRouter = new PublicRouter(this.playbackSessionManager)
 
-    Logger.logManager = this.logManager
+    Logger.logManager = new LogManager()
 
     this.server = null
-    this.io = null
   }
 
+  /**
+   * Middleware to check if the current request is authenticated
+   *
+   * @param {import('express').Request} req
+   * @param {import('express').Response} res
+   * @param {import('express').NextFunction} next
+   */
   authMiddleware(req, res, next) {
-    this.auth.authMiddleware(req, res, next)
+    // ask passportjs if the current request is authenticated
+    this.auth.isAuthenticated(req, res, next)
   }
 
+  cancelLibraryScan(libraryId) {
+    LibraryScanner.setCancelLibraryScan(libraryId)
+  }
+
+  /**
+   * Initialize database, backups, logs, rss feeds, cron jobs & watcher
+   * Cleanup stale/invalid data
+   */
   async init() {
     Logger.info('[Server] Init v' + version)
+    Logger.info('[Server] Node.js Version:', process.version)
+    Logger.info('[Server] Platform:', process.platform)
+    Logger.info('[Server] Arch:', process.arch)
+
     await this.playbackSessionManager.removeOrphanStreams()
 
-    const previousVersion = await this.db.checkPreviousVersion() // Returns null if same server version
-    if (previousVersion) {
-      Logger.debug(`[Server] Upgraded from previous version ${previousVersion}`)
-    }
-    if (previousVersion && previousVersion.localeCompare('2.0.0') < 0) { // Old version data model migration
-      Logger.debug(`[Server] Previous version was < 2.0.0 - migration required`)
-      await dbMigration.migrate(this.db)
-    } else {
-      await this.db.init()
+    /**
+     * Docker container ffmpeg/ffprobe binaries are included in the image.
+     * Docker is currently using ffmpeg/ffprobe v6.1 instead of v5.1 so skipping the check
+     * TODO: Support binary check for all sources
+     */
+    if (global.Source !== 'docker') {
+      await this.binaryManager.init()
     }
 
+    await Database.init(false)
+
+    await Logger.logManager.init()
+
     // Create token secret if does not exist (Added v2.1.0)
-    if (!this.db.serverSettings.tokenSecret) {
+    if (!Database.serverSettings.tokenSecret) {
       await this.auth.initTokenSecret()
     }
 
     await this.cleanUserData() // Remove invalid user item progress
-    await this.purgeMetadata() // Remove metadata folders without library item
-    await this.playbackSessionManager.removeInvalidSessions()
-    await this.cacheManager.ensureCachePaths()
+    await CacheManager.ensureCachePaths()
 
+    await ShareManager.init()
     await this.backupManager.init()
-    await this.logManager.init()
-    await this.apiRouter.checkRemoveEmptySeries(this.db.series) // Remove empty series
-    await this.rssFeedManager.init()
-    this.cronManager.init()
+    await RssFeedManager.init()
 
-    if (this.db.serverSettings.scannerDisableWatcher) {
+    const libraries = await Database.libraryModel.getAllWithFolders()
+    await this.cronManager.init(libraries)
+    this.apiCacheManager.init()
+
+    if (Database.serverSettings.scannerDisableWatcher) {
       Logger.info(`[Server] Watcher is disabled`)
-      this.watcher.disabled = true
+      Watcher.disabled = true
     } else {
-      this.watcher.initWatcher(this.db.libraries)
-      this.watcher.on('files', this.filesChanged.bind(this))
+      Watcher.initWatcher(libraries)
+      Watcher.on('scanFilesChanged', (pendingFileUpdates, pendingTask) => {
+        LibraryScanner.scanFilesChanged(pendingFileUpdates, pendingTask)
+      })
     }
+  }
+
+  /**
+   * Listen for SIGINT and uncaught exceptions
+   */
+  initProcessEventListeners() {
+    let sigintAlreadyReceived = false
+    process.on('SIGINT', async () => {
+      if (!sigintAlreadyReceived) {
+        sigintAlreadyReceived = true
+        Logger.info('SIGINT (Ctrl+C) received. Shutting down...')
+        await this.stop()
+        Logger.info('Server stopped. Exiting.')
+      } else {
+        Logger.info('SIGINT (Ctrl+C) received again. Exiting immediately.')
+      }
+      process.exit(0)
+    })
+
+    /**
+     * @see https://nodejs.org/api/process.html#event-uncaughtexceptionmonitor
+     */
+    process.on('uncaughtExceptionMonitor', async (error, origin) => {
+      await Logger.fatal(`[Server] Uncaught exception origin: ${origin}, error:`, util.format('%O', error))
+    })
+    /**
+     * @see https://nodejs.org/api/process.html#event-unhandledrejection
+     */
+    process.on('unhandledRejection', async (reason, promise) => {
+      await Logger.fatal('[Server] Unhandled rejection:', reason, '\npromise:', util.format('%O', promise))
+      process.exit(1)
+    })
   }
 
   async start() {
     Logger.info('=== Starting Server ===')
+    this.initProcessEventListeners()
     await this.init()
 
     const app = express()
+
+    app.use((req, res, next) => {
+      if (!global.ServerSettings.allowIframe) {
+        // Prevent clickjacking by disallowing iframes
+        res.setHeader('Content-Security-Policy', "frame-ancestors 'self'")
+      }
+
+      /**
+       * @temporary
+       * This is necessary for the ebook & cover API endpoint in the mobile apps
+       * The mobile app ereader is using fetch api in Capacitor that is currently difficult to switch to native requests
+       * so we have to allow cors for specific origins to the /api/items/:id/ebook endpoint
+       * The cover image is fetched with XMLHttpRequest in the mobile apps to load into a canvas and extract colors
+       * @see https://ionicframework.com/docs/troubleshooting/cors
+       *
+       * Running in development allows cors to allow testing the mobile apps in the browser
+       * or env variable ALLOW_CORS = '1'
+       */
+      if (Logger.isDev || req.path.match(/\/api\/items\/([a-z0-9-]{36})\/(ebook|cover)(\/[0-9]+)?/)) {
+        const allowedOrigins = ['capacitor://localhost', 'http://localhost']
+        if (global.AllowCors || Logger.isDev || allowedOrigins.some((o) => o === req.get('origin'))) {
+          res.header('Access-Control-Allow-Origin', req.get('origin'))
+          res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS')
+          res.header('Access-Control-Allow-Headers', '*')
+          res.header('Access-Control-Allow-Credentials', true)
+          if (req.method === 'OPTIONS') {
+            return res.sendStatus(200)
+          }
+        }
+      }
+
+      next()
+    })
+
+    // parse cookies in requests
+    app.use(cookieParser())
+    // enable express-session
+    app.use(
+      expressSession({
+        secret: global.ServerSettings.tokenSecret,
+        resave: false,
+        saveUninitialized: false,
+        cookie: {
+          // also send the cookie if were are not on https (not every use has https)
+          secure: false
+        },
+        store: new MemoryStore(86400000, 86400000, 1000)
+      })
+    )
+    // init passport.js
+    app.use(passport.initialize())
+    // register passport in express-session
+    app.use(this.auth.ifAuthNeeded(passport.session()))
+    // config passport.js
+    await this.auth.initPassportJs()
+
     const router = express.Router()
+    // if RouterBasePath is set, modify all requests to include the base path
+    app.use((req, res, next) => {
+      const urlStartsWithRouterBasePath = req.url.startsWith(global.RouterBasePath)
+      const host = req.get('host')
+      const protocol = req.secure || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http'
+      const prefix = urlStartsWithRouterBasePath ? global.RouterBasePath : ''
+      req.originalHostPrefix = `${protocol}://${host}${prefix}`
+      if (!urlStartsWithRouterBasePath) {
+        req.url = `${global.RouterBasePath}${req.url}`
+      }
+      next()
+    })
     app.use(global.RouterBasePath, router)
     app.disable('x-powered-by')
 
     this.server = http.createServer(app)
 
-    router.use(this.auth.cors)
-    router.use(fileUpload())
-    router.use(express.urlencoded({ extended: true, limit: "5mb" }));
-    router.use(express.json({ limit: "5mb" }))
+    router.use(
+      fileUpload({
+        defCharset: 'utf8',
+        defParamCharset: 'utf8',
+        useTempFiles: true,
+        tempFileDir: Path.join(global.MetadataPath, 'tmp')
+      })
+    )
+    router.use(express.urlencoded({ extended: true, limit: '5mb' }))
+    router.use(express.json({ limit: '5mb' }))
+
+    router.use('/api', this.auth.ifAuthNeeded(this.authMiddleware.bind(this)), this.apiRouter.router)
+    router.use('/hls', this.authMiddleware.bind(this), this.hlsRouter.router)
+    router.use('/public', this.publicRouter.router)
 
     // Static path to generated nuxt
     const distPath = Path.join(global.appRoot, '/client/dist')
     router.use(express.static(distPath))
 
-    // Metadata folder static path
-    router.use('/metadata', this.authMiddleware.bind(this), express.static(global.MetadataPath))
-
     // Static folder
     router.use(express.static(Path.join(global.appRoot, 'static')))
 
-    router.use('/api', this.authMiddleware.bind(this), this.apiRouter.router)
-    router.use('/hls', this.authMiddleware.bind(this), this.hlsRouter.router)
-    router.use('/s', this.authMiddleware.bind(this), this.staticRouter.router)
-
-    // EBook static file routes
-    router.get('/ebook/:library/:folder/*', (req, res) => {
-      const library = this.db.libraries.find(lib => lib.id === req.params.library)
-      if (!library) return res.sendStatus(404)
-      const folder = library.folders.find(fol => fol.id === req.params.folder)
-      if (!folder) return res.status(404).send('Folder not found')
-
-      const remainingPath = req.params['0']
-      const fullPath = Path.join(folder.fullPath, remainingPath)
-      res.sendFile(fullPath)
-    })
-
     // RSS Feed temp route
-    router.get('/feed/:id', (req, res) => {
-      Logger.info(`[Server] Requesting rss feed ${req.params.id}`)
-      this.rssFeedManager.getFeed(req, res)
+    router.get('/feed/:slug', (req, res) => {
+      Logger.info(`[Server] Requesting rss feed ${req.params.slug}`)
+      RssFeedManager.getFeed(req, res)
     })
-    router.get('/feed/:id/cover', (req, res) => {
-      this.rssFeedManager.getFeedCover(req, res)
+    router.get('/feed/:slug/cover*', (req, res) => {
+      RssFeedManager.getFeedCover(req, res)
     })
-    router.get('/feed/:id/item/:episodeId/*', (req, res) => {
-      Logger.debug(`[Server] Requesting rss feed episode ${req.params.id}/${req.params.episodeId}`)
-      this.rssFeedManager.getFeedItem(req, res)
+    router.get('/feed/:slug/item/:episodeId/*', (req, res) => {
+      Logger.debug(`[Server] Requesting rss feed episode ${req.params.slug}/${req.params.episodeId}`)
+      RssFeedManager.getFeedItem(req, res)
     })
+
+    // Auth routes
+    await this.auth.initAuthRoutes(router)
 
     // Client dynamic routes
-    const dyanimicRoutes = [
+    const dynamicRoutes = [
       '/item/:id',
       '/author/:id',
       '/audiobook/:id/chapters',
@@ -199,21 +350,23 @@ class Server {
       '/library/:library/search',
       '/library/:library/bookshelf/:id?',
       '/library/:library/authors',
+      '/library/:library/narrators',
+      '/library/:library/stats',
       '/library/:library/series/:id?',
       '/library/:library/podcast/search',
       '/library/:library/podcast/latest',
+      '/library/:library/podcast/download-queue',
       '/config/users/:id',
       '/config/users/:id/sessions',
       '/config/item-metadata-utils/:id',
       '/collection/:id',
-      '/playlist/:id'
+      '/playlist/:id',
+      '/share/:slug'
     ]
-    dyanimicRoutes.forEach((route) => router.get(route, (req, res) => res.sendFile(Path.join(distPath, 'index.html'))))
+    dynamicRoutes.forEach((route) => router.get(route, (req, res) => res.sendFile(Path.join(distPath, 'index.html'))))
 
-    router.post('/login', this.getLoginRateLimiter(), (req, res) => this.auth.login(req, res))
-    router.post('/logout', this.authMiddleware.bind(this), this.logout.bind(this))
     router.post('/init', (req, res) => {
-      if (this.db.hasRootUser) {
+      if (Database.hasRootUser) {
         Logger.error(`[Server] attempt to init server when server already has a root user`)
         return res.sendStatus(500)
       }
@@ -223,8 +376,12 @@ class Server {
       // status check for client to see if server has been initialized
       // server has been initialized if a root user exists
       const payload = {
-        isInit: this.db.hasRootUser,
-        language: this.db.serverSettings.language
+        app: 'audiobookshelf',
+        serverVersion: version,
+        isInit: Database.hasRootUser,
+        language: Database.serverSettings.language,
+        authMethods: Database.serverSettings.authActiveAuthMethods,
+        authFormData: Database.serverSettings.authFormData
       }
       if (!payload.isInit) {
         payload.ConfigPath = global.ConfigPath
@@ -236,7 +393,7 @@ class Server {
       Logger.info('Received ping')
       res.json({ success: true })
     })
-    app.get('/healthcheck', (req, res) => res.sendStatus(200))
+    router.get('/healthcheck', (req, res) => res.sendStatus(200))
 
     this.server.listen(this.Port, this.Host, () => {
       if (this.Host) Logger.info(`Listening on http://${this.Host}:${this.Port}`)
@@ -250,117 +407,84 @@ class Server {
   async initializeServer(req, res) {
     Logger.info(`[Server] Initializing new server`)
     const newRoot = req.body.newRoot
-    let rootPash = newRoot.password ? await this.auth.hashPass(newRoot.password) : ''
+    const rootUsername = newRoot.username || 'root'
+    const rootPash = newRoot.password ? await this.auth.hashPass(newRoot.password) : ''
     if (!rootPash) Logger.warn(`[Server] Creating root user with no password`)
-    let rootToken = await this.auth.generateAccessToken({ userId: 'root', username: newRoot.username })
-    await this.db.createRootUser(newRoot.username, rootPash, rootToken)
+    await Database.createRootUser(rootUsername, rootPash, this.auth)
 
     res.sendStatus(200)
   }
 
-  async filesChanged(fileUpdates) {
-    Logger.info('[Server]', fileUpdates.length, 'Files Changed')
-    await this.scanner.scanFilesChanged(fileUpdates)
-  }
-
-  // Remove unused /metadata/items/{id} folders
-  async purgeMetadata() {
-    const itemsMetadata = Path.join(global.MetadataPath, 'items')
-    if (!(await fs.pathExists(itemsMetadata))) return
-    const foldersInItemsMetadata = await fs.readdir(itemsMetadata)
-
-    let purged = 0
-    await Promise.all(foldersInItemsMetadata.map(async foldername => {
-      const hasMatchingItem = this.db.libraryItems.find(ab => ab.id === foldername)
-      if (!hasMatchingItem) {
-        const folderPath = Path.join(itemsMetadata, foldername)
-        Logger.debug(`[Server] Purging unused metadata ${folderPath}`)
-
-        await fs.remove(folderPath).then(() => {
-          purged++
-        }).catch((err) => {
-          Logger.error(`[Server] Failed to delete folder path ${folderPath}`, err)
-        })
-      }
-    }))
-    if (purged > 0) {
-      Logger.info(`[Server] Purged ${purged} unused library item metadata`)
-    }
-    return purged
-  }
-
-  // Remove user media progress with items that no longer exist & remove seriesHideFrom that no longer exist
+  /**
+   * Remove user media progress for items that no longer exist & remove seriesHideFrom that no longer exist
+   */
   async cleanUserData() {
-    for (let i = 0; i < this.db.users.length; i++) {
-      const _user = this.db.users[i]
-      let hasUpdated = false
-      if (_user.mediaProgress.length) {
-        const lengthBefore = _user.mediaProgress.length
-        _user.mediaProgress = _user.mediaProgress.filter(mp => {
-          const libraryItem = this.db.libraryItems.find(li => li.id === mp.libraryItemId)
-          if (!libraryItem) return false
-          if (mp.episodeId && (libraryItem.mediaType !== 'podcast' || !libraryItem.media.checkHasEpisode(mp.episodeId))) return false // Episode not found
-          return true
-        })
-
-        if (lengthBefore > _user.mediaProgress.length) {
-          Logger.debug(`[Server] Removing ${_user.mediaProgress.length - lengthBefore} media progress data from user ${_user.username}`)
-          hasUpdated = true
+    // Get all media progress without an associated media item
+    const mediaProgressToRemove = await Database.mediaProgressModel.findAll({
+      where: {
+        '$podcastEpisode.id$': null,
+        '$book.id$': null
+      },
+      attributes: ['id'],
+      include: [
+        {
+          model: Database.bookModel,
+          attributes: ['id']
+        },
+        {
+          model: Database.podcastEpisodeModel,
+          attributes: ['id']
         }
-      }
-      if (_user.seriesHideFromContinueListening.length) {
-        _user.seriesHideFromContinueListening = _user.seriesHideFromContinueListening.filter(seriesId => {
-          if (!this.db.series.some(se => se.id === seriesId)) { // Series removed
-            hasUpdated = true
-            return false
+      ]
+    })
+    if (mediaProgressToRemove.length) {
+      // Remove media progress
+      const mediaProgressRemoved = await Database.mediaProgressModel.destroy({
+        where: {
+          id: {
+            [Sequelize.Op.in]: mediaProgressToRemove.map((mp) => mp.id)
           }
-          return true
-        })
-      }
-      if (hasUpdated) {
-        await this.db.updateEntity('user', _user)
-      }
-    }
-  }
-
-  // First time login rate limit is hit
-  loginLimitReached(req, res, options) {
-    Logger.error(`[Server] Login rate limit (${options.max}) was hit for ip ${req.ip}`)
-    options.message = 'Too many attempts. Login temporarily locked.'
-  }
-
-  getLoginRateLimiter() {
-    return rateLimit({
-      windowMs: this.db.serverSettings.rateLimitLoginWindow, // 5 minutes
-      max: this.db.serverSettings.rateLimitLoginRequests,
-      skipSuccessfulRequests: true,
-      onLimitReached: this.loginLimitReached
-    })
-  }
-
-  logout(req, res) {
-    if (req.body.socketId) {
-      Logger.info(`[Server] User ${req.user ? req.user.username : 'Unknown'} is logging out with socket ${req.body.socketId}`)
-      SocketAuthority.logout(req.body.socketId)
-    }
-
-    res.sendStatus(200)
-  }
-
-  async stop() {
-    await this.watcher.close()
-    Logger.info('Watcher Closed')
-
-    return new Promise((resolve) => {
-      this.server.close((err) => {
-        if (err) {
-          Logger.error('Failed to close server', err)
-        } else {
-          Logger.info('Server successfully closed')
         }
-        resolve()
       })
-    })
+      if (mediaProgressRemoved) {
+        Logger.info(`[Server] Removed ${mediaProgressRemoved} media progress for media items that no longer exist in db`)
+      }
+    }
+
+    // Remove series from hide from continue listening that no longer exist
+    try {
+      const users = await Database.sequelize.query(`SELECT u.id, u.username, u.extraData, json_group_array(value) AS seriesIdsToRemove FROM users u, json_each(u.extraData->"seriesHideFromContinueListening") LEFT JOIN series se ON se.id = value WHERE se.id IS NULL GROUP BY u.id;`, {
+        model: Database.userModel,
+        type: Sequelize.QueryTypes.SELECT
+      })
+      for (const user of users) {
+        const extraData = JSON.parse(user.extraData)
+        const existingSeriesIds = extraData.seriesHideFromContinueListening
+        const seriesIdsToRemove = JSON.parse(user.dataValues.seriesIdsToRemove)
+        Logger.info(`[Server] Found ${seriesIdsToRemove.length} non-existent series in seriesHideFromContinueListening for user "${user.username}" - Removing (${seriesIdsToRemove.join(',')})`)
+        const newExtraData = {
+          ...extraData,
+          seriesHideFromContinueListening: existingSeriesIds.filter((s) => !seriesIdsToRemove.includes(s))
+        }
+        await user.update({ extraData: newExtraData })
+      }
+    } catch (error) {
+      Logger.error(`[Server] Failed to cleanup users seriesHideFromContinueListening`, error)
+    }
+  }
+
+  /**
+   * Gracefully stop server
+   * Stops watcher and socket server
+   */
+  async stop() {
+    Logger.info('=== Stopping Server ===')
+    Watcher.close()
+    Logger.info('[Server] Watcher Closed')
+    await SocketAuthority.close()
+    Logger.info('[Server] Closing HTTP Server')
+    await new Promise((resolve) => this.server.close(resolve))
+    Logger.info('[Server] HTTP Server Closed')
   }
 }
 module.exports = Server
